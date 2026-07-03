@@ -15,7 +15,7 @@ detects conflicts and back-solves wake/leave times.
 - **Source of truth (edit here):** `C:\LifeManager`
 - **Deployed to:** GitHub repo **`JonathanDesta/GymApp`**, branch `main`
 - **Live URL (installed on the user's iPhone as a PWA):** https://jonathandesta.github.io/GymApp/
-- **Current service-worker cache version:** `day-v15` (in `sw.js`)
+- **Current service-worker cache version:** `day-v16` (in `sw.js`)
 - The repo is **PUBLIC** — never hard-code secrets (keys, Outlook feed URL) into source.
 
 > Note: `C:\GymApp` is a DIFFERENT, older app (the original Routines+Lifts app). The
@@ -202,6 +202,9 @@ To test tomorrow's look-ahead: put events in `DATA.calCache[tomorrowISO()]`, the
   Search API also geocodes (handles POI names; Nominatim is the no-key fallback).
   No fabricated time-of-day scaling exists (removed in day-v14); before a real value
   loads, a plainly-labeled "approx" free-flow placeholder shows. Optional Google Maps key.
+  `isVirtualLoc()` (day-v16) skips travel for video-call/URL "locations" (Zoom/Meet/
+  Teams/links) and keeps them out of the travel chain; room-only locations ("Room 204")
+  intentionally KEEP the fallback buffer — they're physical, just not geocodable.
 - **Master timeline** (`timeline.js` + Today view in `app.js`): §6 above.
 - **Night routine "before I go out"** (`timeline.js` §5 + Today adjustments): per-day
   `nightMode`/`nightOutTime`.

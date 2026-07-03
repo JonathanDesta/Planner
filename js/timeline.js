@@ -15,6 +15,8 @@ function intervalsOverlap(a, b) { return a.start < b.end && b.start < a.end; }
 // (the leg's clock time) on weekday `dow`, traffic-adjusted.
 function travelMin(originAddr, destAddr, pending, whenMin, dow) {
   if (!originAddr || !destAddr || normAddr(originAddr) === normAddr(destAddr)) return { min: 0, exact: true, none: true };
+  // Video calls / links aren't places — no drive, and don't queue a geocode.
+  if (isVirtualLoc(originAddr) || isVirtualLoc(destAddr)) return { min: 0, exact: true, none: true };
   const r = travelSecCached(originAddr, destAddr, DATA.settings.travelMode, whenMin, dow);
   if (r && r.exact) return { min: Math.max(1, Math.round(r.sec / 60)), exact: true, factor: r.factor, live: r.live };
   // geocoded but no real route yet → show the rough estimate, fetch the real one
@@ -155,7 +157,7 @@ function computeTimeline(dateISO) {
   // go directly after — defaulting to home when there's nothing adjacent. Each leg
   // is timed for its own clock time so traffic is estimated for that moment.
   const stops = segments
-    .filter(s => s.location && normAddr(s.location) !== normAddr(home) && (s.type === "event" || s.type === "task" || s.type === "workout"))
+    .filter(s => s.location && !isVirtualLoc(s.location) && normAddr(s.location) !== normAddr(home) && (s.type === "event" || s.type === "task" || s.type === "workout"))
     .sort((a, b) => a.start - b.start);
   let prevLoc = home, prevEnd = wakeMin;
   stops.forEach(stop => {

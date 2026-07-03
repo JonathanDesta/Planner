@@ -17,6 +17,20 @@ let gmapsPromise = null;
 
 function normAddr(a) { return (a || "").trim().toLowerCase().replace(/\s+/g, " "); }
 
+// Calendar "locations" that aren't physical places — video-call links, app names,
+// phone bridges — get NO travel legs. Kept conservative on purpose: a room-only
+// location ("Room 204") is usually a real building the geocoder just can't parse,
+// so those keep the fallback travel buffer rather than silently losing travel.
+function isVirtualLoc(loc) {
+  const l = (loc || "").trim().toLowerCase();
+  if (!l) return false;
+  if (/^(https?:\/\/|www\.)/.test(l)) return true; // any link
+  if (/(zoom\.us|meet\.google\.com|teams\.microsoft\.com|teams\.live\.com|webex\.com|gotomeeting\.com|gotomeet\.me|skype\.com|discord\.gg|discord\.com|hangouts\.google)/.test(l)) return true;
+  if (/^(zoom|google meet|meet|microsoft teams|teams|webex|skype|facetime|discord|google hangouts?|online|virtual|virtual meeting|remote|phone|phone call|call|conference call|dial[- ]?in|video call|tbd|n\/a)$/.test(l)) return true;
+  if (/\b(zoom|teams|webex|google meet|skype)\b.*\b(meeting|call|link|url)\b/.test(l)) return true;
+  return false;
+}
+
 // ── Geocoding ──
 function geocodeCached(addr) {
   const k = normAddr(addr);
