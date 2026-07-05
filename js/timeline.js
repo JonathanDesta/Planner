@@ -133,10 +133,79 @@ function computeTimeline(dateISO) {
     }
   }
 
-  // ── 4. Flexible tasks (no fixed time) → fill gaps ──
+  // Located stops placed so far (events, fixed tasks, workout), in day order —
+  // the travel chain runs over these. Recomputed in §5b after flexible blocks
+  // are placed, since located one-off tasks join the chain too.
+  const locatedStops = () => segments
+    .filter(s => s.location && !isVirtualLoc(s.location) && normAddr(s.location) !== normAddr(home) && (s.type === "event" || s.type === "task" || s.type === "workout"))
+    .sort((a, b) => a.start - b.start);
+
+  // Predict the chain's travel legs for a stop list. Each inbound leg carries
+  // the context §5b needs for its status/conflict messages.
+  function chainLegs(stops) {
+    const legs = [];
+    let prevLoc = home, prevEnd = wakeMin;
+    stops.forEach(stop => {
+      const gap = stop.start - prevEnd;
+      let wentHome = false;
+      // long gap since the last stop → you return home in between
+      if (prevLoc && normAddr(prevLoc) !== normAddr(home) && gap > GROUP_GAP) {
+        const tv = travelMin(prevLoc, home, pending, prevEnd, dow);
+        if (tv.min > 0) legs.push({ start: prevEnd, end: prevEnd + tv.min, toHome: true, tv });
+        prevLoc = home;
+        wentHome = true;
+      }
+      const origin = (prevLoc && normAddr(prevLoc) !== normAddr(home)) ? prevLoc : home;
+      const tv = travelMin(origin, stop.location, pending, stop.start, dow);
+      if (tv.min > 0) legs.push({ start: stop.start - tv.min, end: stop.start, stop, tv, origin, wentHome, prevEnd, gap });
+      prevLoc = stop.location; prevEnd = stop.end;
+    });
+    if (prevLoc && normAddr(prevLoc) !== normAddr(home)) {
+      const tv = travelMin(prevLoc, home, pending, prevEnd, dow);
+      if (tv.min > 0) legs.push({ start: prevEnd, end: prevEnd + tv.min, toHome: true, tv });
+    }
+    return legs;
+  }
+
+  // ── 3b. Hold the travel time around the fixed commitments ──
+  // The real legs are only drawn in §5b, once every block is placed — reserving
+  // their time now keeps the night routine and one-off tasks from being slotted
+  // into, say, the drive home from an evening class.
+  chainLegs(locatedStops()).forEach(l => occupied.push({ start: l.start, end: l.end }));
+
+  // ── 4. Nighttime routine — at its usual start time, or before going out ──
+  // The routine normally starts at its usual time (Settings → "Night routine
+  // usually starts", default 8:00 PM) and slides later when that slot is taken.
+  // If you're going out, it instead moves to finish before you leave. Placed
+  // before the flexible tasks so they fill around it, not steal its slot.
+  if (nDur > 0) {
+    let nightOut = (plan.nightMode === "beforeOut" && hmToMin(plan.nightOutTime) != null) ? hmToMin(plan.nightOutTime) : null;
+    if (nightOut != null && nightOut <= wakeMin) nightOut += 1440; // late-night out
+    if (nightOut != null) {
+      const nightStart = nightOut - nDur;
+      const lastBusy = occupied.filter(o => o.end <= nightOut + 1).reduce((m, o) => Math.max(m, o.end), morningEnd);
+      const status = nightStart < lastBusy - 1 ? "conflict" : "ok";
+      if (status === "conflict") conflicts.push(`To finish the night routine before going out at ${fmtClock(nightOut)} you'd need to start by ${fmtClock(nightStart)}, but your day runs to ${fmtClock(lastBusy)}.`);
+      add({ start: nightStart, end: nightOut, type: "routine", label: "Nighttime routine", sub: `${nDur} min · before you go out (${fmtClock(nightOut)})`, status, go: "Night" });
+    } else {
+      let pref = hmToMin(plan.nightTime || S.nightTime) ?? (bedMin - nDur);
+      if (pref <= wakeMin) pref += 1440; // a past-midnight usual time rolls over like bedtime
+      pref = Math.min(Math.max(pref, morningEnd), bedMin - nDur); // must still end by bed
+      const place = findGap(occupied, morningEnd, bedMin, nDur, pref);
+      if (place == null) {
+        conflicts.push(`No room left for the ${nDur}-min night routine before your ${fmtClock(bedMin)} bedtime.`);
+        add({ start: bedMin - nDur, end: bedMin, type: "routine", label: "Nighttime routine", sub: `${nDur} min · usually ${fmtClock(pref)}`, status: "conflict", go: "Night" });
+      } else {
+        const moved = Math.abs(place - pref) > 5;
+        add({ start: place, end: place + nDur, type: "routine", label: "Nighttime routine", sub: `${nDur} min` + (moved ? ` · moved from ${fmtClock(pref)}` : ""), status: moved ? "moved" : "ok", go: "Night" });
+      }
+    }
+  }
+
+  // ── 5. Flexible tasks (no fixed time) → fill gaps ──
   (plan.tasks || []).filter(t => t.fixedStart == null).forEach(t => {
     const need = (t.durMin || 30);
-    const place = findGap(occupied, morningEnd, bedMin - nDur, need, null);
+    const place = findGap(occupied, morningEnd, bedMin, need, null);
     if (place == null) { conflicts.push(`Task "${t.name}" (${need} min) doesn't fit today.`); return; }
     add({ start: place, end: place + need, type: "task", label: t.name, sub: `${need} min`, status: "ok", taskId: t.id });
   });
@@ -145,68 +214,32 @@ function computeTimeline(dateISO) {
   // preferring the time Claude scheduled them but moving them if it's taken.
   flexEvents.forEach(ev => {
     const need = Math.max(10, (ev.endMin - ev.startMin) || 30);
-    const place = findGap(occupied, morningEnd, bedMin - nDur, need, ev.startMin);
+    const place = findGap(occupied, morningEnd, bedMin, need, ev.startMin);
     if (place == null) { conflicts.push(`Work block "${ev.title}" (${need} min) doesn't fit today.`); return; }
     const moved = Math.abs(place - ev.startMin) > 5;
     add({ start: place, end: place + need, type: "task", label: ev.title, sub: `${need} min · work block` + (moved ? ` · from ${fmtClock(ev.startMin)}` : ""), status: "ok", flex: true });
   });
 
-  // ── 4b. Travel chain ──
+  // ── 5b. Travel chain ──
   // For every located block, the inbound leg starts from where you'll be directly
   // before it (the previous located block) and the outbound leg goes to where you
   // go directly after — defaulting to home when there's nothing adjacent. Each leg
   // is timed for its own clock time so traffic is estimated for that moment.
-  const stops = segments
-    .filter(s => s.location && !isVirtualLoc(s.location) && normAddr(s.location) !== normAddr(home) && (s.type === "event" || s.type === "task" || s.type === "workout"))
-    .sort((a, b) => a.start - b.start);
-  let prevLoc = home, prevEnd = wakeMin;
-  stops.forEach(stop => {
-    const gap = stop.start - prevEnd;
-    let wentHome = false;
-    // long gap since the last stop → you return home in between
-    if (prevLoc && normAddr(prevLoc) !== normAddr(home) && gap > GROUP_GAP) {
-      const tv = travelMin(prevLoc, home, pending, prevEnd, dow);
-      if (tv.min > 0) add({ start: prevEnd, end: prevEnd + tv.min, type: "travel", label: "Travel home", sub: travelSub(tv), status: "ok", location: home });
-      prevLoc = home;
-      wentHome = true;
+  chainLegs(locatedStops()).forEach(l => {
+    if (l.toHome) {
+      add({ start: l.start, end: l.end, type: "travel", label: "Travel home", sub: travelSub(l.tv), status: "ok", location: home });
+      return;
     }
-    const origin = (prevLoc && normAddr(prevLoc) !== normAddr(home)) ? prevLoc : home;
-    const tv = travelMin(origin, stop.location, pending, stop.start, dow);
-    if (tv.min > 0) {
-      const depart = stop.start - tv.min;
-      let status = "ok";
-      if (!wentHome && normAddr(origin) !== normAddr(home) && depart < prevEnd - 1) {
-        // a fixed commitment you genuinely can't reach in time is a conflict;
-        // the flexible workout can just start later, so flag it softly as "tight".
-        if (stop.type === "workout") status = "tight";
-        else { status = "conflict"; conflicts.push(`Only ${Math.max(0, gap)} min to get from your previous stop to "${stop.label}", but the drive is ~${tv.min} min${tv.factor > 1.08 ? " in traffic" : ""}.`); }
-      }
-      add({ start: depart, end: stop.start, type: "travel", label: "Travel → " + stop.label, sub: travelSub(tv), status, location: stop.location });
+    const { stop, tv, origin, wentHome, prevEnd, gap } = l;
+    let status = "ok";
+    if (!wentHome && normAddr(origin) !== normAddr(home) && l.start < prevEnd - 1) {
+      // a fixed commitment you genuinely can't reach in time is a conflict;
+      // the flexible workout can just start later, so flag it softly as "tight".
+      if (stop.type === "workout") status = "tight";
+      else { status = "conflict"; conflicts.push(`Only ${Math.max(0, gap)} min to get from your previous stop to "${stop.label}", but the drive is ~${tv.min} min${tv.factor > 1.08 ? " in traffic" : ""}.`); }
     }
-    prevLoc = stop.location; prevEnd = stop.end;
+    add({ start: l.start, end: stop.start, type: "travel", label: "Travel → " + stop.label, sub: travelSub(tv), status, location: stop.location });
   });
-  if (prevLoc && normAddr(prevLoc) !== normAddr(home)) {
-    const tv = travelMin(prevLoc, home, pending, prevEnd, dow);
-    if (tv.min > 0) add({ start: prevEnd, end: prevEnd + tv.min, type: "travel", label: "Travel home", sub: travelSub(tv), status: "ok", location: home });
-  }
-
-  // ── 5. Nighttime routine — ends at bedtime, or before going out ──
-  // If you're going out, the routine (shower, skincare, etc.) moves to finish
-  // before you leave instead of at bedtime.
-  if (nDur > 0) {
-    let nightOut = (plan.nightMode === "beforeOut" && hmToMin(plan.nightOutTime) != null) ? hmToMin(plan.nightOutTime) : null;
-    if (nightOut != null && nightOut <= wakeMin) nightOut += 1440; // late-night out
-    const nightEnd = nightOut != null ? nightOut : bedMin;
-    const nightStart = nightEnd - nDur;
-    const lastBusy = occupied.filter(o => o.end <= nightEnd + 1).reduce((m, o) => Math.max(m, o.end), morningEnd);
-    const status = nightStart < lastBusy - 1 ? "conflict" : "ok";
-    if (status === "conflict") {
-      if (nightOut != null) conflicts.push(`To finish the night routine before going out at ${fmtClock(nightEnd)} you'd need to start by ${fmtClock(nightStart)}, but your day runs to ${fmtClock(lastBusy)}.`);
-      else conflicts.push(`Your day runs to ${fmtClock(lastBusy)} but the night routine needs to start by ${fmtClock(nightStart)} for a ${fmtClock(bedMin)} bedtime.`);
-    }
-    const sub = nightOut != null ? `${nDur} min · before you go out (${fmtClock(nightEnd)})` : `${nDur} min · ends ${fmtClock(bedMin)}`;
-    add({ start: nightStart, end: nightEnd, type: "routine", label: "Nighttime routine", sub, status, go: "Night" });
-  }
 
   // ── 6. Fill the gaps with free time ──
   const sorted = segments.slice().sort((a, b) => a.start - b.start);

@@ -50,6 +50,7 @@ const PRESET_SETTINGS = {
   gymAddress: "Crunch Chamblee",
   wakeTime: "08:30",
   bedTime: "00:45",          // 12:45 AM (after midnight — the timeline rolls it over)
+  nightTime: "20:00",        // nighttime routine usually starts 8:00 PM
   travelMode: "driving",
 };
 const PRESET_WORKOUT = {
@@ -94,6 +95,7 @@ function defaultData() {
       workoutAppUrl: "https://jonathandesta.github.io/oly-tracker/", // embedded in the Workout tab
     }, PRESET_SETTINGS),
     olyState: null, // synced snapshot of the embedded workout app: { data:<oly_state>, ts }
+    olyDurations: null, // synced copy of the workout app's published week durations (oly_day_durations)
     places: {},     // normalizedAddress -> { lat, lon, label, ts }
     routeCache: {}, // "olat,olon|dlat,dlon|mode" -> { sec, ts }
     dayPlans: {},   // 'YYYY-MM-DD' -> { wakeTime?, bedTime?, workoutDepart?, workoutSkip?, tasks:[], removedEventIds:[] }
@@ -162,6 +164,13 @@ function normalizeData() {
   if (!DATA.routeCache || typeof DATA.routeCache !== "object") DATA.routeCache = {};
   if (!DATA.dayPlans || typeof DATA.dayPlans !== "object") DATA.dayPlans = {};
   if (!DATA.calCache || typeof DATA.calCache !== "object") DATA.calCache = {};
+
+  // Housekeeping: drop per-day plans/caches safely in the past so the synced
+  // file doesn't grow forever (viewing any day auto-creates a dayPlan entry;
+  // calendar events re-fetch on demand; routine history lives in the logs).
+  const planCutoff = isoForOffset(-14), calCutoff = isoForOffset(-2);
+  for (const k of Object.keys(DATA.dayPlans)) if (k < planCutoff) delete DATA.dayPlans[k];
+  for (const k of Object.keys(DATA.calCache)) if (k < calCutoff) delete DATA.calCache[k];
 }
 
 // Per-day plan accessor (ad-hoc tasks, one-off overrides).

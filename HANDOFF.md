@@ -15,7 +15,7 @@ detects conflicts and back-solves wake/leave times.
 - **Source of truth (edit here):** `C:\LifeManager`
 - **Deployed to:** GitHub repo **`JonathanDesta/GymApp`**, branch `main`
 - **Live URL (installed on the user's iPhone as a PWA):** https://jonathandesta.github.io/GymApp/
-- **Current service-worker cache version:** `day-v16` (in `sw.js`)
+- **Current service-worker cache version:** `day-v17` (in `sw.js`)
 - The repo is **PUBLIC** — never hard-code secrets (keys, Outlook feed URL) into source.
 
 > Note: `C:\GymApp` is a DIFFERENT, older app (the original Routines+Lifts app). The

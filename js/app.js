@@ -99,16 +99,17 @@ function todayView() {
     h += `<div class="frow"><label>Gym departure</label><input type="time" id="tDepart" class="sel" value="${minToHM(workoutDepartMin(todayISO()))}"></div>
     <div class="frow"><label>Skip workout today</label><input type="checkbox" id="tSkip" ${workoutSkippedFor(todayISO()) ? "checked" : ""}></div>`;
   }
-  // night routine: at bedtime, or moved before you go out
-  const nMode = plan.nightMode === "beforeOut" ? "beforeOut" : "bed";
+  // night routine: at its usual start time, or moved before you go out
+  const nMode = plan.nightMode === "beforeOut" ? "beforeOut" : "usual";
   const evDeparts = tl.segments.filter(s => s.type === "travel" && s.label.indexOf("home") < 0 && (s.start % 1440) >= 16 * 60);
   const suggestOut = evDeparts.length ? minToHM(evDeparts[evDeparts.length - 1].start % 1440) : "20:00";
   h += `<div class="frow"><label>Night routine</label>
     <select id="tNightMode" class="sel">
-      <option value="bed" ${nMode === "bed" ? "selected" : ""}>At bedtime</option>
+      <option value="bed" ${nMode === "usual" ? "selected" : ""}>Usual time</option>
       <option value="beforeOut" ${nMode === "beforeOut" ? "selected" : ""}>Before I go out</option>
     </select></div>`;
   if (nMode === "beforeOut") h += `<div class="frow"><label>Finish before I leave at</label><input type="time" id="tNightOut" class="sel" value="${plan.nightOutTime || suggestOut}"></div>`;
+  else h += `<div class="frow"><label>Night routine starts at</label><input type="time" id="tNightAt" class="sel" value="${plan.nightTime || DATA.settings.nightTime || "20:00"}"></div>`;
   h += `</div>`;
 
   // ad-hoc tasks
@@ -205,6 +206,7 @@ function bindToday() {
     persist("Night routine set"); render();
   };
   const tno = $("#tNightOut"); if (tno) tno.onchange = () => { dayPlan(todayISO()).nightOutTime = tno.value; persist("Leave-by set"); render(); };
+  const tna = $("#tNightAt"); if (tna) tna.onchange = () => { dayPlan(todayISO()).nightTime = tna.value; persist("Night routine time set"); render(); };
   const na = $("#ntAdd"); if (na) na.onclick = () => {
     const name = ($("#ntName").value || "").trim(); if (!name) { toast("Name the task"); return; }
     const dur = parseInt($("#ntDur").value, 10) || 30;
@@ -269,6 +271,8 @@ function settingsView() {
   h += `<div class="card"><div class="cardhd"><b>Daily defaults</b></div>
     <div class="frow"><label>Default wake time</label><input type="time" id="sWake" class="sel" value="${S.wakeTime || "07:00"}"></div>
     <div class="frow"><label>Default bedtime</label><input type="time" id="sBed" class="sel" value="${S.bedTime || "23:00"}"></div>
+    <div class="frow"><label>Night routine usually starts</label><input type="time" id="sNight" class="sel" value="${S.nightTime || "20:00"}"></div>
+    <div class="hint">The timeline places the nighttime routine at this start time and slides it later on days when that slot is taken.</div>
   </div>`;
 
   h += `<div class="card"><div class="cardhd"><b>Data</b></div>
@@ -299,6 +303,7 @@ function bindSettings() {
   bind("#sWkUrl", v => S.workoutAppUrl = v.trim());
   bind("#sWake", v => S.wakeTime = v);
   bind("#sBed", v => S.bedTime = v);
+  bind("#sNight", v => S.nightTime = v);
   const ex = $("#sExport"); if (ex) ex.onclick = () => {
     const blob = new Blob([JSON.stringify(DATA, null, 2)], { type: "application/json" });
     const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "day-backup-" + todayISO() + ".json"; a.click();
