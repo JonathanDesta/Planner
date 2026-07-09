@@ -4,25 +4,23 @@
 // runner shows the active step large with a countdown, a master ahead/behind
 // pace clock, and Done/Skip. Ported from the sister Routines app.
 
-const ROUTINE_VERSION = 8; // bump to re-seed default morning steps on existing installs
+const ROUTINE_VERSION = 9; // bump to re-seed default morning steps on existing installs
 const NIGHT_VERSION = 2;   // bump to re-seed default night steps
 
 // Day-aware morning order. Haircare is a two-shower flow (Mon + Thu) around the
-// masque sit; MON is a shave day so the cleanse is in Shower 1; the everyday
-// cold shower runs only on non-haircare days. `detail` shows amounts/technique.
+// masque sit; both are shave days, so the cleanse is in Shower 1 and the face
+// shave fills the masque sit; the everyday cold shower runs only on
+// non-haircare days. `detail` shows amounts/technique.
 const ROUTINE_SEED = [
   { id: "bed", name: "Out of bed + make bed", targetSec: 120, days: "daily" },
   { id: "bathroom", name: "Bathroom — pee + poop", targetSec: 600, days: "daily" },
   { id: "oral", name: "Oral hygiene (brush, mouthwash, water floss, tongue scrape)", targetSec: 330, days: "daily" },
-  { id: "shower1mon", name: "Shower 1 — facial cleanse + shampoo + apply masque", targetSec: 240, days: ["Mon"], parallel: true, masqueSec: 600, bgName: "Masque sit", detail: "Cleanse face first (you shave right after). Shampoo: nickel-sized, massaged into scalp. Masque: 3 palmfuls, combed through." },
-  { id: "shower1thu", name: "Shower 1 — shampoo + apply masque", targetSec: 180, days: ["Thu"], parallel: true, masqueSec: 600, bgName: "Masque sit", detail: "Shampoo: nickel-sized, massaged into scalp. Masque: 3 palmfuls, combed through." },
-  { id: "bodyshave", name: "Shave armpits + pubes", targetSec: 600, days: ["Tue"], detail: "Before the shower so you rinse off right after." },
+  { id: "shower1", name: "Shower 1 — facial cleanse + shampoo + apply masque", targetSec: 240, days: ["Mon", "Thu"], parallel: true, masqueSec: 600, bgName: "Masque sit", detail: "Cleanse face first (you shave right after). Shampoo: nickel-sized, massaged into scalp. Masque: 3 palmfuls, combed through." },
+  { id: "bodyshave", name: "Shave armpits + pubes", targetSec: 600, days: ["Sun"], detail: "Before the shower so you rinse off right after." },
   { id: "shower", name: "Morning shower: cleanse + 3:00 cold + rinse", targetSec: 360, days: ["Tue", "Wed", "Fri", "Sat", "Sun"], cold: true, coldSec: 180 },
-  { id: "faceshave", name: "Face shave — 2 passes (WTG then ATG)", targetSec: 720, days: ["Mon", "Wed", "Fri"] },
+  { id: "faceshave", name: "Face shave — 2 passes (WTG then ATG)", targetSec: 720, days: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sun"], detail: "Every day except Sat. On hair days this fills the masque sit." },
   { id: "skincare_nh", name: "AM skincare: cleanser → Vit C → hyaluronic acid → sunscreen", targetSec: 240, days: ["Tue", "Wed", "Fri", "Sat", "Sun"] },
-  { id: "breakfast_h", name: "Breakfast: cook + eat (3 eggs, 2 toast)", targetSec: 900, days: ["Mon", "Thu"], detail: "Eaten while the hair masque sits." },
-  { id: "shower2mon", name: "Shower 2 — rinse masque + 3:00 cold", targetSec: 300, days: ["Mon"], cold: true, coldSec: 180, detail: "Rinse masque out fully, then 3:00 cold (face already cleansed in Shower 1)." },
-  { id: "shower2thu", name: "Shower 2 — rinse masque + facial cleanse + 3:00 cold", targetSec: 360, days: ["Thu"], cold: true, coldSec: 180, detail: "Rinse masque out fully, cleanse face, then 3:00 cold." },
+  { id: "shower2", name: "Shower 2 — rinse masque + 3:00 cold", targetSec: 300, days: ["Mon", "Thu"], cold: true, coldSec: 180, detail: "Rinse masque out fully, then 3:00 cold (face already cleansed in Shower 1)." },
   { id: "leavein", name: "Leave-in conditioner — comb through", targetSec: 90, days: ["Mon", "Thu"], detail: "1 palmful, rubbed between palms, raked through, then combed." },
   { id: "jojoba", name: "Jojoba oil — rake through", targetSec: 60, days: ["Mon", "Thu"], detail: "3 drops, rubbed between palms, raked through." },
   { id: "stylinggel", name: "Styling gel — rake through", targetSec: 90, days: ["Mon", "Thu"], detail: "1 palmful, raked through." },
@@ -31,7 +29,7 @@ const ROUTINE_SEED = [
   { id: "lotion", name: "Apply lotion", targetSec: 120, days: "daily" },
   { id: "dressed", name: "Get dressed", targetSec: 180, days: "daily" },
   { id: "eyebrowgel", name: "Apply eyebrow gel", targetSec: 60, days: "daily" },
-  { id: "breakfast_nh", name: "Breakfast: cook + eat (3 eggs, 2 toast)", targetSec: 900, days: ["Tue", "Wed", "Fri", "Sat", "Sun"] },
+  { id: "breakfast", name: "Breakfast: cook + eat (3 eggs, 2 toast)", targetSec: 900, days: "daily" },
   { id: "read", name: "Read + take notes — 2 chapters (The Road to Serfdom, then Capitalism and Freedom)", targetSec: 5400, days: "daily", soft: true },
   { id: "clipnails", name: "Clip nails", targetSec: 300, days: ["Sun"] },
   { id: "vacuum", name: "Vacuum", targetSec: 600, days: ["Sun"] },
