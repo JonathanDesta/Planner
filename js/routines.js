@@ -4,7 +4,7 @@
 // runner shows the active step large with a countdown, a master ahead/behind
 // pace clock, and Done/Skip. Ported from the sister Routines app.
 
-const ROUTINE_VERSION = 7; // bump to re-seed default morning steps on existing installs
+const ROUTINE_VERSION = 8; // bump to re-seed default morning steps on existing installs
 const NIGHT_VERSION = 2;   // bump to re-seed default night steps
 
 // Day-aware morning order. Haircare is a two-shower flow (Mon + Thu) around the
@@ -12,6 +12,7 @@ const NIGHT_VERSION = 2;   // bump to re-seed default night steps
 // cold shower runs only on non-haircare days. `detail` shows amounts/technique.
 const ROUTINE_SEED = [
   { id: "bed", name: "Out of bed + make bed", targetSec: 120, days: "daily" },
+  { id: "bathroom", name: "Bathroom — pee + poop", targetSec: 600, days: "daily" },
   { id: "oral", name: "Oral hygiene (brush, mouthwash, water floss, tongue scrape)", targetSec: 330, days: "daily" },
   { id: "shower1mon", name: "Shower 1 — facial cleanse + shampoo + apply masque", targetSec: 240, days: ["Mon"], parallel: true, masqueSec: 600, bgName: "Masque sit", detail: "Cleanse face first (you shave right after). Shampoo: nickel-sized, massaged into scalp. Masque: 3 palmfuls, combed through." },
   { id: "shower1thu", name: "Shower 1 — shampoo + apply masque", targetSec: 180, days: ["Thu"], parallel: true, masqueSec: 600, bgName: "Masque sit", detail: "Shampoo: nickel-sized, massaged into scalp. Masque: 3 palmfuls, combed through." },
