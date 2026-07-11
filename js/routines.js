@@ -4,7 +4,7 @@
 // runner shows the active step large with a countdown, a master ahead/behind
 // pace clock, and Done/Skip. Ported from the sister Routines app.
 
-const ROUTINE_VERSION = 9; // bump to re-seed default morning steps on existing installs
+const ROUTINE_VERSION = 10; // bump to re-seed default morning steps on existing installs
 const NIGHT_VERSION = 2;   // bump to re-seed default night steps
 
 // Day-aware morning order. Haircare is a two-shower flow (Mon + Thu) around the
@@ -18,7 +18,7 @@ const ROUTINE_SEED = [
   { id: "shower1", name: "Shower 1 — facial cleanse + shampoo + apply masque", targetSec: 240, days: ["Mon", "Thu"], parallel: true, masqueSec: 600, bgName: "Masque sit", detail: "Cleanse face first (you shave right after). Shampoo: nickel-sized, massaged into scalp. Masque: 3 palmfuls, combed through." },
   { id: "bodyshave", name: "Shave armpits + pubes", targetSec: 600, days: ["Sun"], detail: "Before the shower so you rinse off right after." },
   { id: "shower", name: "Morning shower: cleanse + 3:00 cold + rinse", targetSec: 360, days: ["Tue", "Wed", "Fri", "Sat", "Sun"], cold: true, coldSec: 180 },
-  { id: "faceshave", name: "Face shave — 2 passes (WTG then ATG)", targetSec: 720, days: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sun"], detail: "Every day except Sat. On hair days this fills the masque sit." },
+  { id: "faceshave", name: "Face shave — 2 passes (WTG then ATG)", targetSec: 720, days: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat"], detail: "Every day except Sun. On hair days this fills the masque sit." },
   { id: "skincare_nh", name: "AM skincare: cleanser → Vit C → hyaluronic acid → sunscreen", targetSec: 240, days: ["Tue", "Wed", "Fri", "Sat", "Sun"] },
   { id: "shower2", name: "Shower 2 — rinse masque + 3:00 cold", targetSec: 300, days: ["Mon", "Thu"], cold: true, coldSec: 180, detail: "Rinse masque out fully, then 3:00 cold (face already cleansed in Shower 1)." },
   { id: "leavein", name: "Leave-in conditioner — comb through", targetSec: 90, days: ["Mon", "Thu"], detail: "1 palmful, rubbed between palms, raked through, then combed." },
