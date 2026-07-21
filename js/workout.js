@@ -77,6 +77,41 @@ function captureOlyState() {
     saveDrive().then(() => setSync("synced ✓", "ok")).catch(() => setSync("saved on device", "warn"));
   }, 3500);
 }
+// ── Cross-container sync file ─────────────────────────────────────────────────
+// The STANDALONE Oly-Tracker install (its own iOS storage container — invisible
+// to us) publishes its state to Drive file "oly_sync.json" (same OAuth client,
+// so drive.file scope lets us read it). Pull it on connect and adopt it when
+// it's newer than our captured copy, so a week/block advanced in the standalone
+// app lands here automatically. Day never writes this file — the workout app
+// (standalone or embedded, which reuses our token) owns it.
+let _olySyncFileId = null;
+async function pullOlySync() {
+  if (!accessToken) return;
+  captureOlyState(); // fold any fresh embedded edits first so the ts comparison is fair
+  if (_olySyncFileId === null) {
+    const q = "name='oly_sync.json' and trashed=false";
+    const r = await fetch("https://www.googleapis.com/drive/v3/files?q=" + encodeURIComponent(q) + "&spaces=drive&fields=files(id)",
+      { headers: { Authorization: "Bearer " + accessToken } });
+    if (!r.ok) return;
+    const j = await r.json();
+    _olySyncFileId = (j.files && j.files.length) ? j.files[0].id : "";
+  }
+  if (!_olySyncFileId) return;
+  const r = await fetch("https://www.googleapis.com/drive/v3/files/" + _olySyncFileId + "?alt=media",
+    { headers: { Authorization: "Bearer " + accessToken } });
+  if (!r.ok) return;
+  const remote = await r.json();
+  if (!remote || !remote.ts || !remote.state) return;
+  const curTs = (DATA.olyState && DATA.olyState.ts) || 0;
+  if (remote.ts <= curTs) return;
+  DATA.olyState = { data: remote.state, ts: remote.ts };
+  if (remote.durations && remote.durations.min) DATA.olyDurations = remote.durations;
+  _lastOlyJSON = JSON.stringify(remote.state); // don't re-capture the adoption
+  seedOlyDown();
+  persist("Workout data synced");
+  if (typeof render === "function") render();
+}
+
 // Returns true if it changed localStorage (caller should reload the iframe).
 function seedOlyDown() {
   // Seed the synced duration snapshot too (the embedded app republishes it on

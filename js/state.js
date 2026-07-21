@@ -247,6 +247,7 @@ async function onConnected() {
     setSync("synced ✓", "ok");
     if (typeof render === "function") render();
     if (DATA.settings.googleCalEnabled && typeof refreshCalendars === "function") refreshCalendars();
+    if (typeof pullOlySync === "function") pullOlySync().catch(() => {});
   } catch (e) {
     setSync("offline · using device", "warn");
     if (!accessToken && googleLinked() && gisAvailable()) trySilentConnect();
