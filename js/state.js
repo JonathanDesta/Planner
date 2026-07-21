@@ -233,7 +233,9 @@ function connectGoogle() {
   if (!clientId()) { toast("Add your Google Client ID in Settings"); return; }
   if (!initTokenClient()) { toast("Google library still loading — try again"); return; }
   setSync("connecting…");
-  tokenClient.requestAccessToken({ prompt: accessToken ? "" : "consent" });
+  // Only a never-linked user needs the consent screen; a returning user gets the
+  // no-prompt flow (popup auto-closes when a Google session already exists).
+  tokenClient.requestAccessToken({ prompt: googleLinked() ? "" : "consent" });
 }
 async function onConnected() {
   setSync("syncing…");

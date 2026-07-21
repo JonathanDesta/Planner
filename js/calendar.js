@@ -186,7 +186,7 @@ async function refreshCalendars(dateISO) {
   // Google
   if (DATA.settings.googleCalEnabled && accessToken) {
     try { const g = await fetchGoogleEvents(dateISO); if (g) { cache.google = g; changed = true; } }
-    catch (e) { /* token expired etc. */ }
+    catch (e) { if (!accessToken && googleLinked()) trySilentConnect(); /* token expired — the tap-to-reauth listener also covers this */ }
   }
   // Outlook
   if ((DATA.settings.outlookIcsUrl || "").trim()) {

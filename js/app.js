@@ -341,6 +341,14 @@ document.addEventListener("visibilitychange", () => { if (document.visibilitySta
       if (!accessToken && googleLinked()) trySilentConnect();
     } else if (++tries > 40) clearInterval(t);
   }, 250);
+  // The boot attempt above is popup-blocked on iOS (GIS popups need a user
+  // gesture). Retry on the next few taps — with a live Google session and prior
+  // consent the popup closes itself, so this reads as staying signed in.
+  let reauthTries = 0;
+  document.addEventListener("pointerdown", () => {
+    if (accessToken || !googleLinked() || !gisAvailable() || reauthTries >= 3) return;
+    if (trySilentConnect()) reauthTries++;
+  }, true);
 })();
 
 if ("serviceWorker" in navigator) {
