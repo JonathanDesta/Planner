@@ -4,23 +4,24 @@
 // runner shows the active step large with a countdown, a master ahead/behind
 // pace clock, and Done/Skip. Ported from the sister Routines app.
 
-const ROUTINE_VERSION = 10; // bump to re-seed default morning steps on existing installs
-const NIGHT_VERSION = 2;   // bump to re-seed default night steps
+const ROUTINE_VERSION = 11; // bump to re-seed default morning steps on existing installs
+const NIGHT_VERSION = 3;   // bump to re-seed default night steps
 
 // Day-aware morning order. Haircare is a two-shower flow (Mon + Thu) around the
 // masque sit; both are shave days, so the cleanse is in Shower 1 and the face
-// shave fills the masque sit; the everyday cold shower runs only on
-// non-haircare days. `detail` shows amounts/technique.
+// shave fills the masque sit; the everyday shower runs only on non-haircare
+// days. The full body scrub lives in the morning shower (the night routine has
+// no shower, just a facial cleanse). `detail` shows amounts/technique.
 const ROUTINE_SEED = [
   { id: "bed", name: "Out of bed + make bed", targetSec: 120, days: "daily" },
   { id: "bathroom", name: "Bathroom — pee + poop", targetSec: 600, days: "daily" },
   { id: "oral", name: "Oral hygiene (brush, mouthwash, water floss, tongue scrape)", targetSec: 330, days: "daily" },
   { id: "shower1", name: "Shower 1 — facial cleanse + shampoo + apply masque", targetSec: 240, days: ["Mon", "Thu"], parallel: true, masqueSec: 600, bgName: "Masque sit", detail: "Cleanse face first (you shave right after). Shampoo: nickel-sized, massaged into scalp. Masque: 3 palmfuls, combed through." },
   { id: "bodyshave", name: "Shave armpits + pubes", targetSec: 600, days: ["Sun"], detail: "Before the shower so you rinse off right after." },
-  { id: "shower", name: "Morning shower: cleanse + 3:00 cold + rinse", targetSec: 360, days: ["Tue", "Wed", "Fri", "Sat", "Sun"], cold: true, coldSec: 180 },
+  { id: "shower", name: "Morning shower: full body scrub + 3:00 cold + rinse", targetSec: 600, days: ["Tue", "Wed", "Fri", "Sat", "Sun"], cold: true, coldSec: 180, detail: "Full scrubbing shower (moved from nighttime): scrub down the whole body, then 3:00 cold, then rinse." },
   { id: "faceshave", name: "Face shave — 2 passes (WTG then ATG)", targetSec: 720, days: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat"], detail: "Every day except Sun. On hair days this fills the masque sit." },
   { id: "skincare_nh", name: "AM skincare: cleanser → Vit C → hyaluronic acid → sunscreen", targetSec: 240, days: ["Tue", "Wed", "Fri", "Sat", "Sun"] },
-  { id: "shower2", name: "Shower 2 — rinse masque + 3:00 cold", targetSec: 300, days: ["Mon", "Thu"], cold: true, coldSec: 180, detail: "Rinse masque out fully, then 3:00 cold (face already cleansed in Shower 1)." },
+  { id: "shower2", name: "Shower 2 — rinse masque + full body scrub + 3:00 cold", targetSec: 540, days: ["Mon", "Thu"], cold: true, coldSec: 180, detail: "Rinse masque out fully, full body scrub (moved from nighttime), then 3:00 cold (face already cleansed in Shower 1)." },
   { id: "leavein", name: "Leave-in conditioner — comb through", targetSec: 90, days: ["Mon", "Thu"], detail: "1 palmful, rubbed between palms, raked through, then combed." },
   { id: "jojoba", name: "Jojoba oil — rake through", targetSec: 60, days: ["Mon", "Thu"], detail: "3 drops, rubbed between palms, raked through." },
   { id: "stylinggel", name: "Styling gel — rake through", targetSec: 90, days: ["Mon", "Thu"], detail: "1 palmful, raked through." },
@@ -38,8 +39,8 @@ const ROUTINE_SEED = [
 
 const NIGHT_SEED = [
   { id: "bacopa", name: "Take bacopa monnieri", targetSec: 60, days: "daily" },
-  { id: "makeshake", name: "Make protein shake (glycine + creatine)", targetSec: 180, days: "daily", detail: "1 scoop protein + glycine + creatine, shake/blend. Made now so it's ready after the shower." },
-  { id: "nightshower", name: "Full scrubbing shower + facial cleanse", targetSec: 600, days: "daily", detail: "Scrub down the whole body, then cleanse the face." },
+  { id: "makeshake", name: "Make protein shake (glycine + creatine)", targetSec: 180, days: "daily", detail: "1 scoop protein + glycine + creatine, shake/blend. Made now so it's ready after washing up." },
+  { id: "nightcleanse", name: "Facial cleanse", targetSec: 180, days: "daily", detail: "Cleanse the face at the sink (full shower is in the morning now)." },
   { id: "nightlotion", name: "Apply lotion", targetSec: 120, days: "daily" },
   { id: "pmskincare", name: "PM skincare: Differin + hyaluronic acid + moisturizer", targetSec: 300, days: "daily", detail: "Differin gel: pea-sized on dry skin. Then hyaluronic acid, then PM facial moisturizer." },
   { id: "drinkshake", name: "Drink protein shake", targetSec: 180, days: "daily" },
@@ -236,7 +237,7 @@ function routineRunningView() {
     <div class="mstep-target">target ${fmtSec(s.targetSec)}</div>
     ${s.detail ? `<div class="mstep-detail">${escapeHtml(s.detail)}</div>` : ""}`;
   if (s.cold) {
-    if (!RUN.cold) h += `<div class="subtimer"><div class="sub-stages">cleanse → <b>3:00 cold</b> → rinse</div>
+    if (!RUN.cold) h += `<div class="subtimer"><div class="sub-stages">scrub → <b>3:00 cold</b> → rinse</div>
       <button class="btn primary sm" id="coldStart">Start 3:00 cold ❄</button></div>`;
     else h += `<div class="subtimer cold"><div class="sub-stages">❄ cold exposure — <span id="coldStage">${RUN.cold.done ? "rinse now" : "hold"}</span></div>
       <div class="mstep-clock" id="coldClock">${fmtSec(Math.max(0, Math.round((RUN.cold.endTs - Date.now()) / 1000)))}</div></div>`;
