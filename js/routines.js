@@ -92,6 +92,14 @@ function routineBudgetSec(cfg, dow, drop) {
 // a generated sound on a media-channel <audio> (sounds on silent), unlocked on
 // first tap, plus a Screen Wake Lock so the screen stays on mid-timer.
 let alarmEl = null, audioUnlocked = false, audioCtx = null, wakeLock = null, askedNotif = false;
+// Playing any audio normally claims iOS's exclusive "playback" session, which
+// pauses Apple Music when the alarm fires. 'ambient' mixes with other apps'
+// audio instead. Trade-off: ambient audio follows the ringer/silent switch,
+// so with the switch on silent the beep is muted (vibration still fires).
+function setAudioMixing() {
+  try { if ("audioSession" in navigator) navigator.audioSession.type = "ambient"; } catch (e) {}
+}
+setAudioMixing();
 function makeAlarmURI() {
   const sr = 8000, dur = 2.0, n = Math.floor(sr * dur), buf = new ArrayBuffer(44 + n * 2), dv = new DataView(buf);
   const ws = (o, s) => { for (let i = 0; i < s.length; i++) dv.setUint8(o + i, s.charCodeAt(i)); };
@@ -108,6 +116,7 @@ function makeAlarmURI() {
 }
 function initAlarm() { if (!alarmEl) { alarmEl = new Audio(); alarmEl.src = makeAlarmURI(); alarmEl.preload = "auto"; } }
 function unlockAudio() {
+  setAudioMixing();
   initAlarm(); if (audioUnlocked) return; alarmEl.muted = true;
   const p = alarmEl.play();
   const done = () => { try { alarmEl.pause(); alarmEl.currentTime = 0; } catch (e) {} alarmEl.muted = false; audioUnlocked = true; };
@@ -128,6 +137,7 @@ function releaseWake() { try { if (wakeLock) { wakeLock.release(); wakeLock = nu
 function timersActive() { return routineInt != null; }
 function updateWake() { if (timersActive()) acquireWake(); else releaseWake(); }
 function beep(msg) {
+  setAudioMixing();
   try { initAlarm(); alarmEl.muted = false; alarmEl.currentTime = 0; const p = alarmEl.play(); if (p && p.catch) p.catch(() => {}); } catch (e) {}
   try {
     if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)(); if (audioCtx.state === "suspended") audioCtx.resume();
