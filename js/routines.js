@@ -4,7 +4,7 @@
 // runner shows the active step large with a countdown, a master ahead/behind
 // pace clock, and Done/Skip. Ported from the sister Routines app.
 
-const ROUTINE_VERSION = 11; // bump to re-seed default morning steps on existing installs
+const ROUTINE_VERSION = 12; // bump to re-seed default morning steps on existing installs
 const NIGHT_VERSION = 3;   // bump to re-seed default night steps
 
 // Day-aware morning order. Haircare is a two-shower flow (Mon + Thu) around the
@@ -18,10 +18,10 @@ const ROUTINE_SEED = [
   { id: "oral", name: "Oral hygiene (brush, mouthwash, water floss, tongue scrape)", targetSec: 330, days: "daily" },
   { id: "shower1", name: "Shower 1 — facial cleanse + shampoo + apply masque", targetSec: 240, days: ["Mon", "Thu"], parallel: true, masqueSec: 600, bgName: "Masque sit", detail: "Cleanse face first (you shave right after). Shampoo: nickel-sized, massaged into scalp. Masque: 3 palmfuls, combed through." },
   { id: "bodyshave", name: "Shave armpits + pubes", targetSec: 600, days: ["Sun"], detail: "Before the shower so you rinse off right after." },
-  { id: "shower", name: "Morning shower: full body scrub + 3:00 cold + rinse", targetSec: 600, days: ["Tue", "Wed", "Fri", "Sat", "Sun"], cold: true, coldSec: 180, detail: "Full scrubbing shower (moved from nighttime): scrub down the whole body, then 3:00 cold, then rinse." },
+  { id: "shower", name: "Morning shower: full body scrub + 3:00 cold + rinse", targetSec: 840, days: ["Tue", "Wed", "Fri", "Sat", "Sun"], cold: true, coldSec: 180, detail: "Full scrubbing shower (moved from nighttime): scrub down the whole body, then 3:00 cold, then rinse." },
   { id: "faceshave", name: "Face shave — 2 passes (WTG then ATG)", targetSec: 720, days: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat"], detail: "Every day except Sun. On hair days this fills the masque sit." },
   { id: "skincare_nh", name: "AM skincare: cleanser → Vit C → hyaluronic acid → sunscreen", targetSec: 240, days: ["Tue", "Wed", "Fri", "Sat", "Sun"] },
-  { id: "shower2", name: "Shower 2 — rinse masque + full body scrub + 3:00 cold", targetSec: 540, days: ["Mon", "Thu"], cold: true, coldSec: 180, detail: "Rinse masque out fully, full body scrub (moved from nighttime), then 3:00 cold (face already cleansed in Shower 1)." },
+  { id: "shower2", name: "Shower 2 — rinse masque + full body scrub + 3:00 cold", targetSec: 780, days: ["Mon", "Thu"], cold: true, coldSec: 180, detail: "Rinse masque out fully, full body scrub (moved from nighttime), then 3:00 cold (face already cleansed in Shower 1)." },
   { id: "leavein", name: "Leave-in conditioner — comb through", targetSec: 90, days: ["Mon", "Thu"], detail: "1 palmful, rubbed between palms, raked through, then combed." },
   { id: "jojoba", name: "Jojoba oil — rake through", targetSec: 60, days: ["Mon", "Thu"], detail: "3 drops, rubbed between palms, raked through." },
   { id: "stylinggel", name: "Styling gel — rake through", targetSec: 90, days: ["Mon", "Thu"], detail: "1 palmful, raked through." },
