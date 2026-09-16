@@ -1,199 +1,116 @@
 <!doctype html>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Day</title>
-<meta name="theme-color" content="#10182b">
-<link rel="manifest" href="manifest.json">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Day">
-<link rel="apple-touch-icon" href="icon-192.png">
-<link rel="icon" href="icon-192.png">
-<script src="https://accounts.google.com/gsi/client" async defer></script>
-<style>
-:root{color-scheme:light;
- --bg:#f4f6fb;--card:#ffffff;--ink:#1a2030;--mut:#6b7480;--line:#e4e9f2;
- --accent:#4f46e5;--accent2:#6366f1;--navy:#1e293b;--chip:#eef1fb;
- --green:#0f9d58;--greenbg:#e6f4ea;--amber:#b45309;--amberbg:#fdf0e6;
- --red:#c0392b;--redbg:#fdecea;--blue:#2563eb;--bluebg:#e8effd;}
-*{box-sizing:border-box}
-body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;
- color:var(--ink);background:var(--bg);font-size:15px;line-height:1.4}
-.wrap{max-width:720px;margin:0 auto;padding:calc(14px + env(safe-area-inset-top)) 14px 96px}
-header{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
-h1{font-size:19px;margin:0;color:var(--navy);font-weight:800;letter-spacing:.2px}
-.statline{font-size:12px;color:var(--mut);margin-top:2px}
-.sync{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;padding:10px 16px;border-radius:999px;background:var(--chip);color:var(--mut);white-space:nowrap;border:1px solid var(--line);cursor:pointer;margin:0 0 10px;-webkit-appearance:none}
-.sync.ok{background:var(--greenbg);color:var(--green)}
-.sync.warn{background:var(--amberbg);color:var(--amber)}
-.tabs{display:flex;gap:6px;overflow-x:auto;padding-bottom:6px;margin-bottom:10px;-webkit-overflow-scrolling:touch}
-.tab{flex:0 0 auto;border:1px solid var(--line);background:var(--card);color:var(--accent);
- padding:8px 14px;border-radius:999px;font-weight:600;font-size:13.5px;cursor:pointer}
-.tab.active{background:var(--accent);color:#fff;border-color:var(--accent)}
-.daysub{font-size:12.5px;color:var(--mut);margin:0 2px 10px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 13px;margin-bottom:10px;box-shadow:0 1px 2px rgba(20,40,80,.04)}
-.cardhd{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
-.cardhd.row{margin:6px 2px 8px}
-.cardhd b{color:var(--navy)}
-.muted{color:var(--mut);font-size:12.5px}
-.hint{font-size:12px;color:var(--mut);margin-top:8px;line-height:1.45}
-.hintcard{font-size:12.5px;color:var(--mut);background:#fbfcfe}
-hr{border:none;border-top:1px solid var(--line);margin:12px 0}
-.kpis{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
-.kpi{flex:1;min-width:96px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
-.kpi .v{font-size:20px;font-weight:800;color:var(--navy)}
-.kpi .l{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.4px;font-weight:600}
-/* hero */
-.hero{background:linear-gradient(135deg,#1e293b,#4f46e5);color:#fff;border-radius:16px;padding:14px;margin-bottom:10px}
-.hero-row{display:flex;gap:14px}
-.hero-row>div{flex:1}
-.hero-k{font-size:11px;opacity:.8;text-transform:uppercase;letter-spacing:.5px}
-.hero-v{font-size:20px;font-weight:800}
-.hero-leave{margin-top:10px;font-size:13px;background:rgba(255,255,255,.16);padding:7px 10px;border-radius:9px}
-.hero-warn{margin-top:8px;font-size:13px;font-weight:700;background:rgba(255,200,80,.22);padding:7px 10px;border-radius:9px}
-/* alerts */
-.alert{border:1px solid #f3c4bd;background:var(--redbg)}
-.alert-h{font-weight:800;color:var(--red);font-size:13.5px;margin-bottom:5px}
-.alert-l{font-size:12.5px;color:#7a2820;margin:3px 0;line-height:1.4}
-.allday{background:var(--bluebg);border-color:#cfe0fb;font-size:13px;color:#1d4ed8}
-/* night-before look-ahead */
-.lookahead{background:linear-gradient(135deg,#1e293b,#4f46e5);color:#fff;border:none}
-.lookahead .la-h{font-weight:800;font-size:14px;margin-bottom:6px}
-.lookahead .la-l{font-size:13px;line-height:1.45;margin:3px 0;opacity:.95}
-.lookahead .la-l b{color:#fff}
-.lookahead .la-btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
-.lookahead .la-btns .btn.ghost{background:rgba(255,255,255,.18);color:#fff}
-.lookahead .la-note{font-size:12px;margin-top:8px;background:rgba(255,255,255,.16);padding:6px 10px;border-radius:8px}
-.lookahead .la-note a{color:#fff;text-decoration:underline;cursor:pointer}
-/* timeline */
-.tl{display:flex;flex-direction:column;gap:7px;margin-bottom:10px}
-.tlrow{display:flex;gap:10px;background:var(--card);border:1px solid var(--line);border-left:4px solid var(--accent);
- border-radius:11px;padding:9px 11px;align-items:flex-start}
-.tlrow[data-go],.tlrow[data-task]{cursor:pointer}
-.tlrow.routine{border-left-color:var(--accent)}
-.tlrow.travel{border-left-color:#94a3b8;background:#fbfcfe}
-.tlrow.workout{border-left-color:var(--amber)}
-.tlrow.event{border-left-color:var(--blue)}
-.tlrow.task{border-left-color:var(--green)}
-.tlrow.free{border-left-color:#dde3ee;background:#fbfcfe}
-.tlrow.free .tllabel{color:var(--mut);font-weight:600}
-.tlrow.conflict{border-color:#f0b6ad;background:var(--redbg)}
-.tlrow.moved,.tlrow.tight{border-color:#f0d6a8;background:#fffaf0}
-.tltime{font-size:11.5px;color:var(--mut);font-weight:700;font-variant-numeric:tabular-nums;min-width:62px;line-height:1.3}
-.tltime span{display:block;color:#aab2c0;font-weight:600}
-.tlbody{flex:1}
-.tllabel{font-weight:700;font-size:14px}
-.tlsub{font-size:11.5px;color:var(--mut);margin-top:2px}
-.bdg{font-size:10px;font-weight:800;padding:1px 7px;border-radius:7px;vertical-align:middle}
-.bdg.red{background:var(--redbg);color:var(--red)}
-.bdg.amber{background:var(--amberbg);color:var(--amber)}
-.bdg.blue{background:var(--bluebg);color:var(--blue)}
-.bdg.green{background:var(--greenbg);color:var(--green)}
-/* forms */
-.frow{display:flex;align-items:center;gap:10px;justify-content:space-between;margin:8px 0;flex-wrap:wrap}
-.frow label{font-size:12.5px;color:var(--mut);font-weight:600;flex:0 0 auto}
-.sel{padding:9px 10px;border:1px solid var(--line);border-radius:9px;font-size:15px;background:#fff;color:var(--ink)}
-input[type=time].sel,select.sel{min-width:120px}
-.seg{display:flex;gap:6px}
-.segbtn{border:1px solid var(--line);background:#fff;color:var(--accent);border-radius:9px;padding:7px 12px;font-weight:700;font-size:13px;cursor:pointer}
-.segbtn.on{background:var(--accent);color:#fff;border-color:var(--accent)}
-.daypick{display:flex;gap:5px;flex-wrap:wrap}
-.daybtn{border:1px solid var(--line);background:#fff;color:var(--mut);border-radius:8px;padding:7px 9px;font-weight:700;font-size:12px;cursor:pointer;min-width:40px}
-.daybtn.on{background:var(--accent);color:#fff;border-color:var(--accent)}
-.addrow{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-top:6px}
-.fld{display:flex;flex-direction:column;gap:3px}
-.fld label{font-size:10.5px;color:var(--mut);font-weight:600;text-transform:uppercase;letter-spacing:.4px}
-.fld input{padding:9px 8px;border:1px solid var(--line);border-radius:9px;font-size:16px;background:#fff}
-.addtask{display:flex;flex-direction:column;gap:8px}
-.addtask input{font-size:16px}
-.taskrow{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 0;border-bottom:1px solid var(--line)}
-.taskrow:last-of-type{border-bottom:none}
-.chipbtn{border:1px solid var(--line);background:var(--chip);color:var(--accent);border-radius:9px;padding:7px 11px;font-weight:700;font-size:12.5px;cursor:pointer}
-.chipbtn.light{background:rgba(255,255,255,.16);color:#fff;border-color:transparent}
-.btn{border:none;border-radius:11px;padding:12px 16px;font-weight:700;font-size:14.5px;cursor:pointer}
-.btn.primary{background:var(--accent);color:#fff}
-.btn.ghost{background:var(--chip);color:var(--accent)}
-.btn.sm{padding:8px 12px;font-size:13px}
-.btn:active{transform:translateY(1px)}
-/* embedded workout app */
-.wk-summary{display:flex;gap:8px;align-items:center;margin-bottom:8px}
-.wk-pill{flex:1;background:var(--card);border:1px solid var(--line);border-radius:11px;padding:7px 10px;text-align:center}
-.wk-pill b{display:block;font-size:16px;color:var(--navy);font-weight:800;line-height:1.1}
-.wk-pill span{font-size:10px;color:var(--mut);text-transform:uppercase;letter-spacing:.4px;font-weight:600}
-.wk-open{flex:0 0 auto;font-size:12.5px;font-weight:700;color:var(--accent);text-decoration:none;padding:8px 10px;border:1px solid var(--line);border-radius:11px;background:var(--card)}
-.wk-cfg{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:8px 12px;margin-bottom:10px}
-.wk-cfg summary{font-weight:700;color:var(--navy);font-size:13px;cursor:pointer}
-.wk-cfg[open] summary{margin-bottom:6px}
-.workframe{width:100%;height:calc(100dvh - 215px);min-height:540px;border:1px solid var(--line);border-radius:14px;background:#fff;display:block}
-/* routine runner */
-.mstep{display:flex;justify-content:space-between;gap:10px;padding:6px 2px;border-bottom:1px solid var(--line);font-size:14px}
-.mstep:last-child{border-bottom:none}
-.mstep-t{color:var(--mut);font-variant-numeric:tabular-nums;font-weight:600;white-space:nowrap}
-.mstep-d{font-size:11px;color:var(--mut);margin-top:2px;line-height:1.3}
-.tagp{background:var(--chip);color:var(--accent);font-size:10px;padding:1px 6px;border-radius:6px;font-weight:700}
-.tagc{background:var(--bluebg);color:var(--blue);font-size:10px;padding:1px 6px;border-radius:6px;font-weight:700}
-.tags{background:var(--greenbg);color:var(--green);font-size:10px;padding:1px 6px;border-radius:6px;font-weight:700}
-.mstart{display:flex}.mstart .btn{flex:1}
-.mclock-card{background:linear-gradient(135deg,#1e293b,#4f46e5);color:#fff;border-radius:16px;padding:14px;margin-bottom:10px}
-.mclock-top{display:flex;align-items:center;justify-content:space-between;gap:10px}
-.mclock{font-size:34px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1}
-.mclock-sub{font-size:12px;opacity:.82;margin-top:2px}
-.mpace{font-size:13px;font-weight:700;padding:6px 11px;border-radius:999px;background:rgba(255,255,255,.16);white-space:nowrap}
-.mpace.ahead{background:var(--green);color:#fff}
-.mpace.behind{background:var(--red);color:#fff}
-.mstep-active{text-align:center}
-.exnote{font-size:11.5px;color:var(--mut)}
-.mstep-name{font-size:20px;font-weight:800;color:var(--navy);margin:4px 0}
-.mstep-clock{font-size:46px;font-weight:800;font-variant-numeric:tabular-nums;color:var(--navy);line-height:1.1}
-.mstep-clock.over{color:var(--red)}
-.mstep-clock.soft{color:var(--accent)}
-.mstep-target{font-size:12px;color:var(--mut);margin-bottom:8px}
-.mstep-detail{font-size:12.5px;color:#5a6478;background:var(--chip);border-radius:8px;padding:7px 10px;margin:2px 0 10px;line-height:1.4;text-align:left}
-.subtimer{margin:10px 0;padding:10px;border:1px dashed var(--line);border-radius:10px}
-.subtimer.cold{border-color:var(--blue);background:var(--bluebg)}
-.sub-stages{font-size:13px;color:var(--mut);margin-bottom:6px}
-.mbtns{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:8px}
-.mbtns .btn{flex:1;min-width:120px}
-.mnext{font-size:13px}
-.mprog{display:flex;flex-direction:column;gap:4px}
-.mprogrow{display:flex;align-items:center;gap:8px;font-size:13px;padding:3px 0}
-.mprogrow.done{color:var(--mut)}
-.mprogrow.skipped{color:var(--mut);text-decoration:line-through}
-.mprogrow.active{font-weight:700;color:var(--navy)}
-.mpi{width:16px;text-align:center;font-weight:800}
-.edstep{border:1px solid var(--line);border-radius:10px;padding:8px;margin-bottom:8px}
-.ed-name{width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;font-size:14px;font-weight:600}
-.edrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px;font-size:12px;color:var(--mut)}
-.edrow input{padding:6px;border:1px solid var(--line);border-radius:7px;font-size:13px}
-.edchk{display:flex;align-items:center;gap:4px}
-.bgbar{position:fixed;left:50%;bottom:90px;transform:translateX(-50%);min-width:240px;max-width:90vw;background:#1f2a3a;color:#fff;border-radius:12px;padding:8px 10px;display:none;flex-direction:column;gap:6px;z-index:55;box-shadow:0 6px 22px rgba(0,0,0,.28)}
-.bgbar.show{display:flex}
-.bgrow{display:flex;align-items:center;gap:10px}
-.bgrow .bgc{font-size:20px;font-weight:800;font-variant-numeric:tabular-nums;min-width:48px}
-.bgrow .bgl{font-size:12px;opacity:.88}
-.bgrow.done{color:#bff5cf}
-.bgrow .bgx{background:rgba(255,255,255,.18);border:none;color:#fff;border-radius:7px;padding:3px 9px;font-weight:700;cursor:pointer;margin-left:auto}
-.toast{position:fixed;left:50%;bottom:30px;transform:translateX(-50%);background:#222b3a;color:#fff;
- padding:10px 16px;border-radius:10px;font-size:13px;font-weight:600;opacity:0;transition:opacity .25s;pointer-events:none;z-index:60}
-.toast.show{opacity:1}
-</style>
-<div class="wrap">
- <header>
-  <div>
-   <h1>Day</h1>
-   <div class="statline" id="statline">Loading…</div>
-  </div>
- </header>
- <button class="sync" id="sync" type="button">…</button>
- <div class="tabs" id="tabs"></div>
- <div id="view"></div>
-</div>
-<div class="toast" id="toast"></div>
-<div class="bgbar" id="bgbar"></div>
-<script src="js/state.js"></script>
-<script src="js/routines.js"></script>
-<script src="js/workout.js"></script>
-<script src="js/calendar.js"></script>
-<script src="js/travel.js"></script>
-<script src="js/timeline.js"></script>
-<script src="js/app.js"></script>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width,initial-scale=1,viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#183e39" />
+    <meta
+      name="description"
+      content="Your campus day, with room for the real journey."
+    />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <link rel="manifest" href="./manifest.json" />
+    <link rel="apple-touch-icon" href="./icon-192.png" />
+    <link rel="icon" href="./icon-192.png" />
+    <link rel="stylesheet" href="./styles.css" />
+    <title>Day · Campus Planner</title>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to your day</a>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <a class="brand" href="./"
+          ><span class="brand-mark" aria-hidden="true">d.</span
+          ><span
+            >day<span class="brand-sub">A little room for life.</span></span
+          ></a
+        >
+        <nav aria-label="Main navigation">
+          <button data-view="today" aria-current="page">
+            <span aria-hidden="true">◉</span>Today
+          </button>
+          <button data-view="week">
+            <span aria-hidden="true">▦</span>Week
+          </button>
+          <button data-view="morning">
+            <span aria-hidden="true">☀</span>Morning
+          </button>
+          <button data-view="workout">
+            <span aria-hidden="true">↗</span>Workout
+          </button>
+          <button data-view="settings">
+            <span aria-hidden="true">⚙</span>Settings
+          </button>
+        </nav>
+        <div class="sidebar-foot">
+          <span class="status-dot"></span
+          ><span id="sync-status">Saved on this device</span
+          ><small>CHICAGO · CAMPUS EDITION<br />APP 2.0</small>
+        </div>
+      </aside>
+      <div class="workspace">
+        <header class="topbar">
+          <span id="view-label">YOUR DAY, CONSIDERED</span>
+          <div>
+            <button
+              class="quiet"
+              data-action="refresh"
+              aria-label="Refresh calendar and sync"
+            >
+              Refresh</button
+            ><button class="primary" data-action="add">+ Add commitment</button>
+          </div>
+        </header>
+        <div id="update-banner" class="banner" hidden>
+          <span>A new app version is ready.</span
+          ><button data-action="update">Load update</button>
+        </div>
+        <main id="main" tabindex="-1">
+          <section id="page-today" data-page="today">
+            <p class="loading">Putting your day together…</p>
+          </section>
+          <section id="page-week" data-page="week" hidden></section>
+          <section id="page-morning" data-page="morning" hidden></section>
+          <section id="page-workout" data-page="workout" hidden>
+            <div class="page-heading">
+              <div>
+                <p class="eyebrow">YOUR TRAINING, IN ONE PLACE</p>
+                <h1>Keep the program.</h1>
+                <p id="workout-freshness">Connecting to your Oly tracker…</p>
+              </div>
+              <a
+                id="open-workout"
+                class="button quiet"
+                target="_blank"
+                rel="noopener"
+                >Open standalone ↗</a
+              >
+            </div>
+            <div id="workout-summary"></div>
+            <iframe
+              id="workout-frame"
+              title="Oly training journal"
+              allow="fullscreen"
+              referrerpolicy="same-origin"
+            ></iframe>
+          </section>
+          <section id="page-settings" data-page="settings" hidden></section>
+        </main>
+      </div>
+    </div>
+    <dialog id="dialog" aria-labelledby="dialog-title"></dialog>
+    <div id="toast" role="status" hidden></div>
+    <datalist id="places"></datalist>
+    <noscript
+      ><p>
+        Day needs JavaScript to calculate your schedule. Your saved data remains
+        on this device.
+      </p></noscript
+    >
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <script type="module" src="./js/app.js"></script>
+  </body>
+</html>

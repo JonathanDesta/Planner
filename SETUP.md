@@ -1,120 +1,32 @@
-# Day — Life Manager · Setup
+# Setup
 
-A single-file PWA (no backend, no app-store, no cost). It tracks your morning &
-nighttime routines, mirrors your Oly-Tracker workout length, pulls today's
-calendar events, adds travel time, and lays out one master timeline that detects
-conflicts and back-solves your "leave by / wake by" times.
+The existing GitHub Pages URL remains unchanged. Open the app once online before relying on its offline version. On iPhone, add Planner and Oly to the Home Screen independently if desired.
 
-Everything is stored on your device (localStorage) and optionally synced to a
-single private file on your Google Drive.
+## Google connection
 
----
+1. Use one Google Cloud OAuth web client for both apps. Enable the Google Calendar API and Google Drive API.
+2. Set the authorized JavaScript origin to `https://jonathandesta.github.io`. Include your localhost origin separately when developing. Do not enter a URL path as an origin.
+3. Configure consent for `https://www.googleapis.com/auth/calendar.readonly` and `https://www.googleapis.com/auth/drive.file`. If the OAuth application is in testing, add the intended account as a test user.
+4. In Planner Settings, save the client ID and calendar IDs (`primary` by default), then press **Connect Google**. Existing Planner connection settings migrate locally. The embedded Oly app receives the same client ID and temporary token through an origin-checked message.
+5. On a separate device or standalone Oly context, use the same client ID and Google account and press **Connect Google** there as needed.
 
-## 1. Install on your iPhone
+Tokens remain in session storage and are never added to journals, exports of application state, Drive revision contents, or the public repositories. Client IDs and optional routing keys remain device settings. No client secret is needed in this static application.
 
-1. Host the folder as a static site (GitHub Pages — see DEPLOY below).
-2. Open the site in **Safari**.
-3. Share → **Add to Home Screen**. It launches full-screen like a native app.
+The Google token model requires an explicit reconnect after authorization expires. Sync runs while an app is open and connected: on opening, foregrounding, meaningful changes, completion, and a visible periodic retry. A closed iPhone web app cannot be promised background synchronization. See [Google's token model](https://developers.google.com/identity/oauth2/web/guides/use-token-model).
 
----
+Calendar refreshes on connection, foreground return, manual refresh and every fifteen minutes while visible. Failed requests preserve the last successful cache and expose its age. Imported events open Google Calendar for editing. Calendar data is excluded from Planner's Drive projection.
 
-## 2. Google (personal calendar + Drive sync) — optional but recommended
+## Daily use
 
-Both the calendar read and the Drive sync use **one** Google sign-in.
+- Expand Today blocks for the duration, location, source and travel basis. Unplaced items remain under **Still to place**. Start or complete meals and personal commitments to preserve their actual times when replanning.
+- The morning runner supports pause, skip and undo, and survives reload. Timer zero never completes a step. An unstarted bathroom sequence waits for reopening if its full allowance crosses cleaning; an actual overrun is reported.
+- In Oly, log the prescribed work as usual. Comparable completed sessions calibrate scheduling with the median of the latest five. Mark deliberate non-training interruptions for exclusion; warm-ups, queues and normal rests remain included. Declare when a measurement already includes changing.
+- Resolve concurrent versions explicitly from Settings. The private revision history retains both alternatives. Independent records merge automatically.
+- Set door-to-door walking overrides after measuring them. Optional pedestrian routing uses a locally stored TomTom key; four minutes for building transitions are added once. Dated facility overrides supersede the bundled hours.
+- Return trips home during free gaps are opt-in. Without that preference, journeys use the last known physical location. Add a Planner commitment at the dorm when a particular return is required.
 
-1. Go to <https://console.cloud.google.com/> → create/select a project.
-2. **APIs & Services → Enable APIs**: enable **Google Calendar API** and **Google Drive API**.
-3. **APIs & Services → Credentials → Create credentials → OAuth client ID**:
-   - Application type: **Web application**.
-   - **Authorized JavaScript origins**: add your site origin exactly, e.g.
-     `https://<your-username>.github.io` (no path, no trailing slash).
-   - Create, then copy the **Client ID** (`…apps.googleusercontent.com`).
-4. **OAuth consent screen**: set it to **External**, add yourself as a **Test user**
-   (your own Gmail). You don't need Google verification for personal use.
-5. In the app → **Settings**:
-   - Paste the Client ID into **Google Client ID**.
-   - Tick **Use Google Calendar**.
-   - (Optional) list extra calendar IDs, comma-separated. `primary` = your main calendar.
-   - Tap the **connect Google** pill (under the title) and approve the Google consent screen.
+## Backups and updates
 
-Scopes requested: `calendar.readonly` (read events) + `drive.file` (only the one
-sync file this app creates — it can't see anything else in your Drive).
+The first migration saves the original Planner settings, tasks and morning/night history before applying campus defaults. Old storage keys are retained; obsolete automatic nighttime/reading/study routines are deactivated. Use **Export pre-rebuild backup** or **Export Planner backup** in Settings. Oly keeps its own validated journal backups and exports.
 
----
-
-## 3. Outlook / M365 school calendar — optional
-
-Microsoft doesn't use the Google sign-in. Use a published ICS feed:
-
-1. Outlook (web) → **Calendar** → **Settings → Shared calendars** (or **Share → Publish**).
-2. Pick the school calendar, **Publish**, permission **"Can view all details"**.
-3. Copy the **ICS** link (ends in `.ics`).
-4. App → **Settings → Outlook .ics feed URL**: paste it.
-
-**If the feed won't load** (browser CORS block — common with Microsoft): add a
-CORS proxy prefix in **Settings → CORS proxy**, e.g. a self-hosted proxy or a
-public one like `https://corsproxy.io/?` . Note a public proxy sees the calendar
-URL, so prefer your own if the schedule is sensitive. As a fallback you can always
-add one-off classes as tasks on the Today tab.
-
-Recurring weekly classes (FREQ=WEEKLY/DAILY, BYDAY, UNTIL/INTERVAL) are expanded
-for the day you're viewing.
-
----
-
-## 4. Travel time — real traffic via TomTom (recommended, free)
-
-1. Sign up at <https://developer.tomtom.com> (free tier, no credit card).
-2. Create an API key and paste it into **Settings → TomTom API key**.
-3. Set **Home address** and **Gym address** in Settings.
-
-With the key set, every trip uses TomTom's **real live/predictive traffic for that
-trip's own departure time**, and TomTom also geocodes your addresses (it handles
-business names like "Crunch Chamblee"). Until a real value loads you'll briefly see
-a rough placeholder labeled *approx*. There is no fabricated "rush hour" estimate.
-
-- **Without a TomTom key:** addresses are geocoded with OpenStreetMap Nominatim and
-  driving time comes from the public OSRM server — free-flow only, **no traffic**.
-- **Optional Google Maps key:** paste a Maps **JavaScript API** key for Google's
-  live-traffic times and proper transit instead. This *can* bill beyond Google's
-  monthly free credit — leave it blank to stay free.
-
-Results are cached (predictions per weekday + 30-min slot, refreshed every ~3 days),
-so the APIs are hit rarely.
-
----
-
-## 5. Workout length
-
-The **Workout** tab mirrors your Oly-Tracker settings (block, week, cutting) so the
-timeline reserves the right-size gym block. Keep these in sync with the workout app
-when you change blocks. Set your default **"leave the house" time** and **training
-days**. Logging your sets still happens in the separate Oly-Tracker app.
-
----
-
-## 6. Daily use
-
-- **Today** = your master timeline. It shows Leave-by / Wake-by, flags conflicts,
-  and auto-moves the workout when something collides with it.
-- **Today's adjustments** = one-off changes (different wake time, gym time, skip
-  workout) for *today only* — they don't change your defaults.
-- **One-off tasks** = anything extra (dentist, errand). Give it a length and,
-  optionally, a fixed time and a location (travel is added automatically).
-- **Morning / Night** = the timed step runners (countdown, pace, alarm, wake-lock).
-- Edit routine steps in-app via **Edit steps**; defaults re-seed when the version
-  constant is bumped.
-
----
-
-## DEPLOY (GitHub Pages)
-
-```
-# from the LifeManager folder
-git init && git add -A && git commit -m "Day — life manager v1"
-gh repo create <your-username>/day --public --source=. --push
-# then: GitHub → repo → Settings → Pages → Branch: main /(root) → Save
-```
-
-On every update, bump `CACHE_VERSION` in `sw.js` so the installed PWA refreshes
-without a reinstall.
+Do not clear site data to update the apps. Updates install a complete cache and wait for a safe activation. Finish active sessions and save form changes before using an update banner. Each worker is scoped to its app path and cleans only its own cache namespace.

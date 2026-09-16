@@ -1,282 +1,638 @@
-'use strict';
-// ─── Master timeline solver ───────────────────────────────────────────────────
-// Composes the whole day from fixed anchors (calendar events + their travel, plus
-// fixed tasks) and flexible blocks (morning routine, workout, flexible tasks,
-// nighttime routine). Detects conflicts, relocates the workout when it clashes,
-// and back-solves "leave by" / "wake by" for the next hard commitment.
-//
-// All times are minutes-from-midnight on the target local date. Returns a sorted
-// list of segments plus conflict messages and the travel pairs still to prefetch.
+import { atMinute, sleepBounds, formatTime, dateISO } from "./dates.js";
+import { routineBlocks } from "./routines.js";
+import { travelBetween, resolvePlace } from "./travel.js";
+import { facilityHours, insideHours } from "./facilities.js";
 
-function intervalsOverlap(a, b) { return a.start < b.end && b.start < a.end; }
-
-// Travel minutes between two addresses, using cache; records misses for prefetch.
-// Travel minutes between two addresses for a leg happening around `whenMin`
-// (the leg's clock time) on weekday `dow`, traffic-adjusted.
-function travelMin(originAddr, destAddr, pending, whenMin, dow) {
-  if (!originAddr || !destAddr || normAddr(originAddr) === normAddr(destAddr)) return { min: 0, exact: true, none: true };
-  // Video calls / links aren't places — no drive, and don't queue a geocode.
-  if (isVirtualLoc(originAddr) || isVirtualLoc(destAddr)) return { min: 0, exact: true, none: true };
-  const r = travelSecCached(originAddr, destAddr, DATA.settings.travelMode, whenMin, dow);
-  if (r && r.exact) return { min: Math.max(1, Math.round(r.sec / 60)), exact: true, factor: r.factor, live: r.live };
-  // geocoded but no real route yet → show the rough estimate, fetch the real one
-  if (r && !r.exact) { if (pending) pending.push({ origin: originAddr, dest: destAddr, whenMin, dow }); return { min: Math.max(1, Math.round(r.sec / 60)), exact: false, approx: true }; }
-  // not even geocoded yet → plain fallback buffer (no fabricated traffic) + queue a lookup
-  if (pending) pending.push({ origin: originAddr, dest: destAddr, whenMin, dow });
-  return { min: Math.max(1, Math.round(DATA.settings.defaultTravelMin || 15)), exact: false, fallback: true };
+export const overlap = (a, b) => a.start < b.end && b.start < a.end;
+const ordered = (blocks) =>
+  blocks
+    .slice()
+    .sort(
+      (a, b) => a.start - b.start || a.end - b.end || a.id.localeCompare(b.id),
+    );
+export function unionIntervals(intervals) {
+  const result = [];
+  for (const i of ordered(
+    intervals.map((v, n) => ({ ...v, id: v.id || String(n) })),
+  )) {
+    if (i.end <= i.start) continue;
+    const last = result.at(-1);
+    if (last && i.start <= last.end) last.end = Math.max(last.end, i.end);
+    else result.push({ start: i.start, end: i.end });
+  }
+  return result;
 }
-function travelSub(tv) {
-  let s = tv.min + " min";
-  if (tv.factor && tv.factor > 1.08) s += " · +" + Math.round((tv.factor - 1) * 100) + "% traffic";
-  if (tv.live && tv.exact) s += " · live";
-  else if (!tv.exact) s += tv.fallback ? " · est." : " · approx";
-  return s;
-}
-
-// Find the earliest free gap of >= need minutes within [from,until], not colliding
-// with `occupied` (sorted [{start,end}]), preferring a start at/after `pref`.
-function findGap(occupied, from, until, need, pref) {
-  const sorted = occupied.slice().sort((a, b) => a.start - b.start);
-  // candidate windows = spaces between occupied intervals
-  let windows = [];
+export function freeIntervals(blocks, from, until) {
   let cursor = from;
-  for (const iv of sorted) {
-    if (iv.start > cursor) windows.push({ start: cursor, end: Math.min(iv.start, until) });
-    cursor = Math.max(cursor, iv.end);
+  const result = [];
+  for (const b of unionIntervals(blocks)) {
+    if (b.start > cursor)
+      result.push({ start: cursor, end: Math.min(b.start, until) });
+    cursor = Math.max(cursor, b.end);
     if (cursor >= until) break;
   }
-  if (cursor < until) windows.push({ start: cursor, end: until });
-  windows = windows.filter(w => w.end - w.start >= need);
-  if (!windows.length) return null;
-  // prefer a window containing `pref`
-  if (pref != null) {
-    for (const w of windows) if (pref >= w.start && pref + need <= w.end) return pref;
-    for (const w of windows) if (w.start >= pref) return w.start; // next window after pref
-  }
-  return windows[0].start;
+  if (cursor < until) result.push({ start: cursor, end: until });
+  return result.filter((i) => i.end > i.start);
 }
-
-function computeTimeline(dateISO) {
-  dateISO = dateISO || todayISO();
-  const plan = dayPlan(dateISO);
-  const S = DATA.settings;
-  const home = S.homeAddress;
-  const wakeMin = hmToMin(plan.wakeTime || S.wakeTime) ?? 420;
-  let bedMin = hmToMin(plan.bedTime || S.bedTime) ?? 1380;
-  if (bedMin <= wakeMin) bedMin += 1440; // bedtime after midnight
-  const pending = [];
-  const conflicts = [];
-  const segments = [];
-  const occupied = []; // fixed/placed intervals to avoid
-
-  const dow = DOW[new Date(dateISO + "T00:00:00").getDay()];
-  const dropList = plan.dropSteps || []; // morning steps amputated for this date
-  const mDur = Math.round(routineBudgetSec(DATA.routineConfig, dow, dropList) / 60);
-  const nDur = Math.round(routineBudgetSec(DATA.nightConfig, dow) / 60);
-
-  function add(seg) { segments.push(seg); if (seg.blocks !== false) occupied.push({ start: seg.start, end: seg.end }); }
-
-  // ── 1. Morning routine — anchored at wake ──
-  const mSteps = routineSteps(DATA.routineConfig, dow).filter(s => dropList.indexOf(s.id) < 0).length;
-  if (mDur > 0) add({ start: wakeMin, end: wakeMin + mDur, type: "routine", label: "Morning routine", sub: `${mDur} min · ${mSteps} steps` + (dropList.length ? ` · ${dropList.length} moved out` : ""), status: "ok", go: "Morning" });
-  let morningEnd = wakeMin + mDur;
-
-  // ── 2. Calendar events + fixed tasks → outings with travel ──
-  // Events on a "flexible" calendar are work blocks (duration-based, gap-filled),
-  // not fixed appointments — handled in §4 with the other flexible tasks.
-  const events = cachedEventsFor(dateISO).filter(e => !e.allDay && !e.flex).map(e => ({ ...e, kind: "event" }));
-  const flexEvents = cachedEventsFor(dateISO).filter(e => !e.allDay && e.flex);
-  const allDayEvents = cachedEventsFor(dateISO).filter(e => e.allDay);
-  const fixedTasks = (plan.tasks || []).filter(t => t.fixedStart != null && hmToMin(t.fixedStart) != null)
-    .map(t => ({ id: t.id, kind: "task", title: t.name, location: t.location || "", startMin: hmToMin(t.fixedStart), endMin: hmToMin(t.fixedStart) + (t.durMin || 30) }));
-  const anchored = events.concat(fixedTasks).sort((a, b) => a.startMin - b.startMin);
-
-  // Place each commitment (travel legs are added later by the chain pass, so each
-  // leg can use the right origin/destination and the traffic at its clock time).
-  const GROUP_GAP = 90; // gap (min) above which you'd return home between stops
-  anchored.forEach(ev => {
-    const loc = ev.location || "";
-    const status = ev.startMin < morningEnd ? "conflict" : "ok";
-    if (status === "conflict") conflicts.push(`"${ev.title}" at ${fmtClock(ev.startMin)} starts before your morning routine finishes (${fmtClock(morningEnd)}).`);
-    add({ start: ev.startMin, end: Math.max(ev.endMin, ev.startMin + 5), type: ev.kind, label: ev.title, sub: ev.allDay ? "all day" : fmtClock(ev.startMin) + "–" + fmtClock(ev.endMin), status, location: loc, source: ev.source });
+// Includes actual home stops and retains location through virtual commitments.
+export function travelChain(
+  blocks,
+  bounds,
+  settings = {},
+  earlyArrival = false,
+) {
+  const legs = [],
+    issues = [];
+  let previous = {
+      id: "wake",
+      title: "Wake up",
+      start: bounds.wake,
+      end: bounds.wake,
+      location: "grossman",
+    },
+    location = "grossman";
+  const stops = ordered(
+    blocks.filter((b) => b.type !== "travel" && b.type !== "free"),
+  );
+  stops.push({
+    id: "bed-boundary",
+    title: "Bedtime",
+    start: bounds.bed,
+    end: bounds.bed,
+    location: "grossman",
+    boundary: true,
   });
-
-  // overlaps among fixed commitments
-  for (let i = 0; i < anchored.length; i++)
-    for (let j = i + 1; j < anchored.length; j++)
-      if (intervalsOverlap({ start: anchored[i].startMin, end: anchored[i].endMin }, { start: anchored[j].startMin, end: anchored[j].endMin }))
-        conflicts.push(`"${anchored[i].title}" and "${anchored[j].title}" overlap.`);
-
-  // ── 3. Workout block (flexible, prefers its depart time) ──
-  // Reserve the gap as travel + workout + travel (home round-trip estimate at the
-  // preferred departure time); the actual travel legs/origins are set by the chain.
-  const workMin = workoutSkippedFor(dateISO) ? 0 : workoutDurationMin(dateISO);
-  if (workMin > 0) {
-    const gym = S.gymAddress;
-    const pref = workoutDepartMin(dateISO);
-    const tTo = travelMin(home, gym, pending, pref, dow);
-    const tBack = travelMin(gym, home, pending, pref + tTo.min + workMin, dow);
-    const need = tTo.min + workMin + tBack.min;
-    const place = findGap(occupied, Math.min(morningEnd, pref), bedMin - nDur, need, pref);
-    if (place == null) {
-      conflicts.push(`Workout (${need} min incl. travel) doesn't fit before bed — adjust the gym time or shorten the day.`);
-    } else {
-      const moved = Math.abs(place - pref) > 5;
-      // the workout sits at the gym; the chain pass adds travel to/from it.
-      add({ start: place + tTo.min, end: place + tTo.min + workMin, type: "workout", label: "Workout", sub: `${workMin} min · ${workoutBlockName(workoutBlockState().blockId)}` + (moved ? ` · moved from ${fmtClock(pref)}` : ""), status: moved ? "moved" : "ok", go: "Workout", location: gym });
-      // Reserve the travel legs too — the chain pass only adds the actual travel
-      // segments later (after flexible tasks are placed), so without this a
-      // flexible task could be slotted into the drive-to/from-gym window.
-      if (tTo.min > 0) occupied.push({ start: place, end: place + tTo.min });
-      if (tBack.min > 0) occupied.push({ start: place + tTo.min + workMin, end: place + tTo.min + workMin + tBack.min });
-      if (moved) conflicts.push(`Workout moved to ${fmtClock(place)} (your ${fmtClock(pref)} slot was taken).`);
+  for (const stop of stops) {
+    const nextPlace = resolvePlace(stop.location, settings.places);
+    const nextLocation = nextPlace.virtual ? location : stop.location;
+    const route = travelBetween(location, nextLocation, settings);
+    const early =
+      earlyArrival &&
+      stop.type === "event" &&
+      stop.start - previous.end >= route.minutes + 5
+        ? 5
+        : 0;
+    const end = stop.boundary
+      ? previous.end + route.minutes
+      : stop.start - early;
+    const start = end - route.minutes;
+    if (route.minutes)
+      legs.push({
+        id: `travel:${previous.id}:${stop.id}`,
+        title: stop.boundary
+          ? "Walk home"
+          : `Walk to ${route.destination.label}`,
+        start,
+        end,
+        type: "travel",
+        location: nextLocation,
+        route,
+        toId: stop.id,
+        fromId: previous.id,
+      });
+    if (early)
+      legs.push({
+        id: `arrival:${stop.id}`,
+        title: "Arrive and settle in",
+        start: stop.start - early,
+        end: stop.start,
+        type: "buffer",
+        location: nextLocation,
+      });
+    const shortfall = stop.boundary ? end - bounds.bed : previous.end - start;
+    if (shortfall > 0.01)
+      issues.push({
+        id: `reach:${previous.id}:${stop.id}`,
+        blockId: stop.id,
+        kind: "travel",
+        minutes: Math.ceil(shortfall),
+        message: `${stop.title}: ${Math.ceil(shortfall)} more minute${Math.ceil(shortfall) === 1 ? "" : "s"} needed after ${previous.title}${route.minutes ? `, including ${route.minutes} minutes door to door` : ""}.`,
+      });
+    previous = stop;
+    location = nextLocation;
+  }
+  return { legs, issues };
+}
+function validInsertion(blocks, candidate, bounds, settings, baselineIssues) {
+  if (
+    candidate.start < bounds.wake ||
+    candidate.end > bounds.bed ||
+    blocks.some((b) => overlap(b, candidate))
+  )
+    return false;
+  return travelChain([...blocks, candidate], bounds, settings).issues.every(
+    (i) => baselineIssues.get(i.id) >= i.minutes,
+  );
+}
+function candidates(item, blocks, context) {
+  const { date, bounds, settings, previous } = context;
+  const old = previous.find((b) => b.id === item.id);
+  const issueMap = new Map(
+    travelChain(blocks, bounds, settings).issues.map((i) => [i.id, i.minutes]),
+  );
+  const results = [];
+  for (const [placeRank, location] of item.locations.entries()) {
+    const hours =
+      item.type === "meal" || item.type === "workout"
+        ? facilityHours(location, date, settings.hours)
+        : { intervals: [[bounds.wake, bounds.bed]], verified: true };
+    for (const gap of freeIntervals(
+      blocks,
+      Math.max(item.from, bounds.wake),
+      Math.min(item.until, bounds.bed),
+    )) {
+      const starts = new Set();
+      // Five-minute grid plus exact boundaries, preferences, previous placement and
+      // travel-adjusted edges. Exact edges are necessary for short campus gaps.
+      for (
+        let start = Math.ceil(gap.start / 5) * 5;
+        start + item.duration <= gap.end;
+        start += 5
+      )
+        starts.add(start);
+      const before = ordered(blocks.filter((b) => b.end <= gap.start)).at(-1);
+      const after = ordered(blocks.filter((b) => b.start >= gap.end))[0];
+      const inbound = travelBetween(
+        before?.location || "grossman",
+        location,
+        settings,
+      ).minutes;
+      const outbound = travelBetween(
+        location,
+        after?.location || "grossman",
+        settings,
+      ).minutes;
+      [
+        gap.start + inbound,
+        gap.end - outbound - item.duration,
+        item.preferred,
+        old?.start,
+        ...hours.intervals.map(([a]) => Math.max(a, gap.start + inbound)),
+      ]
+        .filter(Number.isFinite)
+        .forEach((s) => starts.add(s));
+      for (const start of starts) {
+        const end = start + item.duration;
+        if (
+          start < gap.start ||
+          end > gap.end ||
+          start < item.from ||
+          end > item.until ||
+          !insideHours(start, end, hours)
+        )
+          continue;
+        const candidate = {
+          ...item,
+          start,
+          end,
+          location,
+          hours,
+          fixed: false,
+        };
+        if (!validInsertion(blocks, candidate, bounds, settings, issueMap))
+          continue;
+        let score =
+          Math.abs(start - item.preferred) * (item.type === "meal" ? 2 : 0.4) +
+          placeRank * 1800 +
+          inbound +
+          outbound;
+        if (old)
+          score +=
+            Math.abs(start - old.start) * 1.5 +
+            (old.location === location ? 0 : 100);
+        results.push({ block: candidate, score });
+      }
     }
   }
-
-  // Located stops placed so far (events, fixed tasks, workout), in day order —
-  // the travel chain runs over these. Recomputed in §5b after flexible blocks
-  // are placed, since located one-off tasks join the chain too.
-  const locatedStops = () => segments
-    .filter(s => s.location && !isVirtualLoc(s.location) && normAddr(s.location) !== normAddr(home) && (s.type === "event" || s.type === "task" || s.type === "workout"))
-    .sort((a, b) => a.start - b.start);
-
-  // Predict the chain's travel legs for a stop list. Each inbound leg carries
-  // the context §5b needs for its status/conflict messages.
-  function chainLegs(stops) {
-    const legs = [];
-    let prevLoc = home, prevEnd = wakeMin;
-    stops.forEach(stop => {
-      const gap = stop.start - prevEnd;
-      let wentHome = false;
-      // long gap since the last stop → you return home in between
-      if (prevLoc && normAddr(prevLoc) !== normAddr(home) && gap > GROUP_GAP) {
-        const tv = travelMin(prevLoc, home, pending, prevEnd, dow);
-        if (tv.min > 0) legs.push({ start: prevEnd, end: prevEnd + tv.min, toHome: true, tv });
-        prevLoc = home;
-        wentHome = true;
-      }
-      const origin = (prevLoc && normAddr(prevLoc) !== normAddr(home)) ? prevLoc : home;
-      const tv = travelMin(origin, stop.location, pending, stop.start, dow);
-      if (tv.min > 0) legs.push({ start: stop.start - tv.min, end: stop.start, stop, tv, origin, wentHome, prevEnd, gap });
-      prevLoc = stop.location; prevEnd = stop.end;
+  // Keep candidates from every feasible gap and dining location, not only the
+  // nearest lunch time: a later gym block can depend on an earlier meal.
+  results.sort(
+    (a, b) =>
+      a.score - b.score ||
+      a.block.start - b.block.start ||
+      a.block.location.localeCompare(b.block.location),
+  );
+  const diverse = new Map();
+  for (const c of results) {
+    const key = `${c.block.location}:${Math.floor((c.block.start - bounds.wake) / 30)}`;
+    if (!diverse.has(key)) diverse.set(key, c);
+  }
+  const perLocation = item.locations.flatMap((location) =>
+    results.filter((r) => r.block.location === location).slice(0, 2),
+  );
+  return [
+    ...new Set([
+      ...perLocation,
+      ...[...new Set([...results.slice(0, 5), ...diverse.values()])].sort(
+        (a, b) => a.score - b.score,
+      ),
+    ]),
+  ].slice(0, 24);
+}
+function placeItems(items, fixed, context) {
+  let beam = [{ blocks: fixed, unplaced: [], score: 0 }];
+  for (const item of items) {
+    const expanded = [];
+    for (const option of beam) {
+      for (const c of candidates(item, option.blocks, context))
+        expanded.push({
+          blocks: [...option.blocks, c.block],
+          unplaced: option.unplaced,
+          score: option.score + c.score,
+        });
+      expanded.push({
+        blocks: option.blocks,
+        unplaced: [...option.unplaced, item],
+        score:
+          option.score +
+          (item.type === "meal"
+            ? 1000000
+            : item.type === "workout"
+              ? 500000
+              : 100000),
+      });
+    }
+    expanded.sort((a, b) => a.score - b.score);
+    // Retain alternate dining locations through intermediate search layers.
+    // Otherwise many near-identical Cathey placements can crowd out the only
+    // feasible dinner near Ratner before the workout is considered.
+    const alternatives = new Map();
+    for (const option of expanded) {
+      const key =
+        option.blocks
+          .filter((b) => !b.fixed)
+          .map((b) => `${b.id}:${b.location}`)
+          .sort()
+          .join("|") +
+        option.unplaced
+          .map((i) => i.id)
+          .sort()
+          .join("|");
+      if (!alternatives.has(key)) alternatives.set(key, option);
+    }
+    beam = [
+      ...new Set([
+        ...Array.from(alternatives.values()).slice(0, 16),
+        ...expanded,
+      ]),
+    ].slice(0, 32);
+  }
+  return beam[0];
+}
+export function scheduleDay({
+  date,
+  settings = {},
+  events = [],
+  commitments = [],
+  workout = null,
+  run = null,
+  activities = {},
+  previous = [],
+  now = Date.now(),
+}) {
+  const bounds = sleepBounds(date, settings.wakeTime || "05:15"),
+    conflicts = [],
+    notes = [];
+  const routine = routineBlocks(
+    date,
+    bounds.wake,
+    run,
+    now,
+    settings.routineDurations,
+  );
+  const morningEnd = routine.at(-1)?.end || bounds.wake;
+  const fixed = [
+    ...routine,
+    ...events
+      .filter((e) => !e.allDay && e.blocks !== false)
+      .map((e) => ({ ...e, fixed: true, type: "event" })),
+  ];
+  const local = commitments.filter((c) => c.date === date);
+  for (const c of local.filter(
+    (c) => c.fixedStart !== null && c.fixedStart !== undefined,
+  )) {
+    const activity = activities[c.id],
+      started = ["complete", "active"].includes(activity?.status);
+    const start = started
+      ? activity.startedAt / 60000
+      : atMinute(date, c.fixedStart);
+    const end =
+      activity?.status === "complete"
+        ? activity.endedAt / 60000
+        : activity?.status === "active"
+          ? Math.max(now / 60000, start + c.duration)
+          : start + c.duration;
+    fixed.push({
+      ...c,
+      start,
+      end,
+      location: activity?.location || c.location,
+      type: "task",
+      fixed: true,
+      active: activity?.status === "active",
+      complete: activity?.status === "complete",
     });
-    if (prevLoc && normAddr(prevLoc) !== normAddr(home)) {
-      const tv = travelMin(prevLoc, home, pending, prevEnd, dow);
-      if (tv.min > 0) legs.push({ start: prevEnd, end: prevEnd + tv.min, toHome: true, tv });
-    }
-    return legs;
   }
-
-  // ── 3b. Hold the travel time around the fixed commitments ──
-  // The real legs are only drawn in §5b, once every block is placed — reserving
-  // their time now keeps the night routine and one-off tasks from being slotted
-  // into, say, the drive home from an evening class.
-  chainLegs(locatedStops()).forEach(l => occupied.push({ start: l.start, end: l.end }));
-
-  // ── 4. Nighttime routine — at its usual start time, or before going out ──
-  // The routine normally starts at its usual time (Settings → "Night routine
-  // usually starts", default 8:00 PM) and slides later when that slot is taken.
-  // If you're going out, it instead moves to finish before you leave. Placed
-  // before the flexible tasks so they fill around it, not steal its slot.
-  if (nDur > 0) {
-    let nightOut = (plan.nightMode === "beforeOut" && hmToMin(plan.nightOutTime) != null) ? hmToMin(plan.nightOutTime) : null;
-    if (nightOut != null && nightOut <= wakeMin) nightOut += 1440; // late-night out
-    if (nightOut != null) {
-      const nightStart = nightOut - nDur;
-      const lastBusy = occupied.filter(o => o.end <= nightOut + 1).reduce((m, o) => Math.max(m, o.end), morningEnd);
-      const status = nightStart < lastBusy - 1 ? "conflict" : "ok";
-      if (status === "conflict") conflicts.push(`To finish the night routine before going out at ${fmtClock(nightOut)} you'd need to start by ${fmtClock(nightStart)}, but your day runs to ${fmtClock(lastBusy)}.`);
-      add({ start: nightStart, end: nightOut, type: "routine", label: "Nighttime routine", sub: `${nDur} min · before you go out (${fmtClock(nightOut)})`, status, go: "Night" });
-    } else {
-      let pref = hmToMin(plan.nightTime || S.nightTime) ?? (bedMin - nDur);
-      if (pref <= wakeMin) pref += 1440; // a past-midnight usual time rolls over like bedtime
-      pref = Math.min(Math.max(pref, morningEnd), bedMin - nDur); // must still end by bed
-      const place = findGap(occupied, morningEnd, bedMin, nDur, pref);
-      if (place == null) {
-        conflicts.push(`No room left for the ${nDur}-min night routine before your ${fmtClock(bedMin)} bedtime.`);
-        add({ start: bedMin - nDur, end: bedMin, type: "routine", label: "Nighttime routine", sub: `${nDur} min · usually ${fmtClock(pref)}`, status: "conflict", go: "Night" });
-      } else {
-        const moved = Math.abs(place - pref) > 5;
-        add({ start: place, end: place + nDur, type: "routine", label: "Nighttime routine", sub: `${nDur} min` + (moved ? ` · moved from ${fmtClock(pref)}` : ""), status: moved ? "moved" : "ok", go: "Night" });
+  const meals = [
+    ["breakfast", "Breakfast", 35, 420, 660, 420],
+    ["lunch", "Lunch", 45, 660, 930, 720],
+    ["dinner", "Dinner", 45, 990, 1290, 1080],
+  ].map(([id, title, duration, from, until, preferred]) => ({
+    id: `meal:${date}:${id}`,
+    meal: id,
+    title,
+    type: "meal",
+    duration: settings.mealMinutes?.[id] || duration,
+    from: Math.max(morningEnd, atMinute(date, from)),
+    until: atMinute(date, until),
+    preferred: Math.max(morningEnd + 5, atMinute(date, preferred)),
+    locations: ["cathey", "woodlawn", "bartlett", "baker"],
+  }));
+  const items = [...meals];
+  if (workout && !workout.complete) {
+    const w = {
+      ...workout,
+      id: `workout:${date}`,
+      title: workout.label || "Workout",
+      type: "workout",
+      locations: ["ratner"],
+      location: "ratner",
+      duration: (workout.forecastSeconds + workout.postChangeSeconds) / 60,
+      from: morningEnd,
+      until: bounds.bed,
+      preferred: atMinute(
+        date,
+        workout.day === "tuesday"
+          ? 930
+          : workout.day === "thursday"
+            ? 1140
+            : 660,
+      ),
+    };
+    if (workout.active && workout.startedAt)
+      fixed.push({
+        ...w,
+        start: workout.startedAt / 60000,
+        end:
+          now / 60000 +
+          (workout.activeRemainingSeconds + workout.postChangeSeconds) / 60,
+        active: true,
+        fixed: true,
+      });
+    else if (workout.visits > 1) {
+      notes.push(
+        "Oly currently specifies multiple visits. Planner retains that work for review under your one-visit limit.",
+      );
+      w.requiresReview = true;
+      items.push(w);
+    } else items.push(w);
+  } else if (workout?.complete && workout.startedAt && workout.endedAt)
+    fixed.push({
+      ...workout,
+      id: `workout:${date}`,
+      title: workout.label,
+      type: "workout",
+      location: "ratner",
+      start: workout.startedAt / 60000,
+      end: workout.endedAt / 60000,
+      complete: true,
+      fixed: true,
+    });
+  for (const c of local.filter(
+    (c) => c.fixedStart === null || c.fixedStart === undefined,
+  ))
+    items.push({
+      ...c,
+      type: "task",
+      locations: [c.location || "grossman"],
+      from: Math.max(morningEnd, atMinute(date, c.earliest ?? 315)),
+      until: Math.min(bounds.bed, atMinute(date, c.latest ?? 1335)),
+      preferred: atMinute(date, c.earliest ?? 720),
+    });
+  const pending = [];
+  for (const item of items) {
+    const activity = activities[item.id];
+    const old = previous.find(
+      (p) =>
+        p.id === item.id &&
+        (!p.fixed || p.earlierPlan) &&
+        p.start <= now / 60000 &&
+        date === dateISO(now),
+    );
+    if (activity?.status === "complete" || activity?.status === "active") {
+      const start = activity.startedAt / 60000,
+        end =
+          activity.status === "complete"
+            ? activity.endedAt / 60000
+            : Math.max(now / 60000, start + item.duration);
+      fixed.push({
+        ...item,
+        start,
+        end,
+        location: activity.location || old?.location || item.locations[0],
+        fixed: true,
+        complete: activity.status === "complete",
+        active: activity.status === "active",
+      });
+    } else if (old && activity?.status !== "replan")
+      fixed.push({ ...old, fixed: true, earlierPlan: true });
+    else {
+      if (activity?.status === "replan" && date === dateISO(now))
+        item.from = Math.max(item.from, now / 60000);
+      pending.push(item);
+    }
+  }
+  const review = pending.filter((i) => i.requiresReview);
+  const solvable = pending.filter((i) => !i.requiresReview);
+  // Explore both meal-first and workout-first placements, selecting the solution
+  // that fits the most required work, then minimizes fallback dining and movement.
+  const context = { date, bounds, settings, previous };
+  const orders = [
+    solvable,
+    [...solvable].sort(
+      (a, b) =>
+        (a.type === "workout" ? -1 : 0) - (b.type === "workout" ? -1 : 0),
+    ),
+  ];
+  const solutions = orders
+    .map((order) => placeItems(order, fixed, context))
+    .sort((a, b) => a.score - b.score);
+  const best = solutions[0];
+  // A stated home-break preference, evaluated only after both journeys fit.
+  // Never infer a return solely from a gap's length or steal a required block.
+  if (settings.returnHomeDuringBreaks === true) {
+    const stops = ordered(best.blocks);
+    for (let i = 0; i < stops.length - 1; i++) {
+      const a = stops[i],
+        b = stops[i + 1];
+      if (
+        resolvePlace(a.location).id === "grossman" ||
+        resolvePlace(a.location).virtual ||
+        resolvePlace(b.location).virtual
+      )
+        continue;
+      const inbound = travelBetween(a.location, "grossman", settings).minutes;
+      const outbound = travelBetween("grossman", b.location, settings).minutes;
+      const start = a.end + inbound,
+        end = b.start - outbound - (b.type === "event" ? 5 : 0);
+      if (end - start < 30) continue;
+      const home = {
+        id: `home-break:${a.id}:${b.id}`,
+        title: "Free time at the dorm",
+        start,
+        end,
+        type: "home",
+        location: "grossman",
+        fixed: false,
+      };
+      const issues = new Map(
+        travelChain(best.blocks, bounds, settings).issues.map((x) => [
+          x.id,
+          x.minutes,
+        ]),
+      );
+      if (validInsertion(best.blocks, home, bounds, settings, issues))
+        best.blocks.push(home);
+    }
+  }
+  const chain = travelChain(best.blocks, bounds, settings, true);
+  conflicts.push(...chain.issues);
+  const primary = ordered(best.blocks);
+  for (let i = 0; i < primary.length; i++) {
+    const a = primary[i];
+    if (a.start < bounds.wake || a.end > bounds.bed)
+      conflicts.push({
+        id: `sleep:${a.id}`,
+        blockId: a.id,
+        kind: "sleep",
+        message: `${a.title} overlaps the protected seven-hour sleep window.`,
+      });
+    if (a.resource === "bathroom")
+      for (const [start, end] of [
+        [420, 480],
+        [855, 870],
+      ])
+        if (
+          overlap(a, { start: atMinute(date, start), end: atMinute(date, end) })
+        )
+          conflicts.push({
+            id: `bathroom:${a.id}`,
+            blockId: a.id,
+            kind: "resource",
+            message: `${a.title} overlaps bathroom cleaning (${formatTime(atMinute(date, start))}–${formatTime(atMinute(date, end))}).`,
+          });
+    if (
+      ["meal", "workout"].includes(a.type) &&
+      !a.complete &&
+      !insideHours(
+        a.start,
+        a.end,
+        facilityHours(a.location, date, settings.hours),
+      )
+    )
+      conflicts.push({
+        id: `hours:${a.id}`,
+        blockId: a.id,
+        kind: "hours",
+        message: `${a.title} falls outside the available facility hours.`,
+      });
+    for (const b of primary.slice(i + 1))
+      if (overlap(a, b))
+        conflicts.push({
+          id: `overlap:${a.id}:${b.id}`,
+          blockId: b.id,
+          kind: "overlap",
+          message: `${a.title} overlaps ${b.title}.`,
+        });
+  }
+  const unplaced = [...best.unplaced, ...review].map((item) => {
+    let largest = 0;
+    if (
+      item.type === "workout" &&
+      item.basis !== "model" &&
+      !item.requiresReview
+    ) {
+      // Diagnostic capacity may reposition meals, but never changes the actual
+      // workout prescription or the returned schedule. Preserve other required
+      // items and use the same travel/hour constraints as the complete search.
+      let low = 0,
+        high = Math.ceil(item.duration);
+      const alreadyUnplaced = new Set(
+        best.unplaced.filter((i) => i.id !== item.id).map((i) => i.id),
+      );
+      while (high - low > 1) {
+        const mid = Math.floor((low + high) / 2);
+        const fits = orders.some((order) =>
+          placeItems(
+            order.map((i) => (i.id === item.id ? { ...i, duration: mid } : i)),
+            fixed,
+            context,
+          ).unplaced.every((i) => alreadyUnplaced.has(i.id)),
+        );
+        if (fits) low = mid;
+        else high = mid;
       }
+      largest = low;
     }
-  }
-
-  // ── 5. Flexible tasks (no fixed time) → fill gaps ──
-  (plan.tasks || []).filter(t => t.fixedStart == null).forEach(t => {
-    const need = (t.durMin || 30);
-    const place = findGap(occupied, morningEnd, bedMin, need, null);
-    if (place == null) { conflicts.push(`Task "${t.name}" (${need} min) doesn't fit today.`); return; }
-    add({ start: place, end: place + need, type: "task", label: t.name, sub: `${need} min`, status: "ok", taskId: t.id });
+    return {
+      ...item,
+      availableMinutes: largest,
+      shortfallMinutes: Math.max(0, Math.ceil(item.duration) - largest),
+      reason: item.requiresReview
+        ? "The source program currently requires more than one visit."
+        : item.type === "workout" && item.basis !== "model"
+          ? `Needs ${Math.ceil(item.duration)} minutes including changing; the largest available window is ${largest} minutes after travel and meals (${Math.ceil(item.duration) - largest} minutes short). Review a workaround before changing training.`
+          : `No continuous ${Math.ceil(item.duration)}-minute slot fits with travel, commitments and opening hours.`,
+      quiet:
+        item.type === "workout" &&
+        item.day === "tuesday" &&
+        item.basis === "model",
+    };
   });
-
-  // Flexible work blocks from the briefing calendar → slot into open time,
-  // preferring the time Claude scheduled them but moving them if it's taken.
-  flexEvents.forEach(ev => {
-    const need = Math.max(10, (ev.endMin - ev.startMin) || 30);
-    const place = findGap(occupied, morningEnd, bedMin, need, ev.startMin);
-    if (place == null) { conflicts.push(`Work block "${ev.title}" (${need} min) doesn't fit today.`); return; }
-    const moved = Math.abs(place - ev.startMin) > 5;
-    add({ start: place, end: place + need, type: "task", label: ev.title, sub: `${need} min · work block` + (moved ? ` · from ${fmtClock(ev.startMin)}` : ""), status: "ok", flex: true });
-  });
-
-  // ── 5b. Travel chain ──
-  // For every located block, the inbound leg starts from where you'll be directly
-  // before it (the previous located block) and the outbound leg goes to where you
-  // go directly after — defaulting to home when there's nothing adjacent. Each leg
-  // is timed for its own clock time so traffic is estimated for that moment.
-  chainLegs(locatedStops()).forEach(l => {
-    if (l.toHome) {
-      add({ start: l.start, end: l.end, type: "travel", label: "Travel home", sub: travelSub(l.tv), status: "ok", location: home });
-      return;
-    }
-    const { stop, tv, origin, wentHome, prevEnd, gap } = l;
-    let status = "ok";
-    if (!wentHome && normAddr(origin) !== normAddr(home) && l.start < prevEnd - 1) {
-      // a fixed commitment you genuinely can't reach in time is a conflict;
-      // the flexible workout can just start later, so flag it softly as "tight".
-      if (stop.type === "workout") status = "tight";
-      else { status = "conflict"; conflicts.push(`Only ${Math.max(0, gap)} min to get from your previous stop to "${stop.label}", but the drive is ~${tv.min} min${tv.factor > 1.08 ? " in traffic" : ""}.`); }
-    }
-    add({ start: l.start, end: stop.start, type: "travel", label: "Travel → " + stop.label, sub: travelSub(tv), status, location: stop.location });
-  });
-
-  // ── 6. Fill the gaps with free time ──
-  const sorted = segments.slice().sort((a, b) => a.start - b.start);
-  let cursor = wakeMin;
-  const free = [];
-  sorted.forEach(s => { if (s.start > cursor + 4) free.push({ start: cursor, end: s.start, type: "free", label: "Free", sub: (s.start - cursor) + " min open", status: "free" }); cursor = Math.max(cursor, s.end); });
-  if (bedMin > cursor + 4) free.push({ start: cursor, end: bedMin, type: "free", label: "Free", sub: (bedMin - cursor) + " min open", status: "free" });
-  const all = sorted.concat(free).sort((a, b) => a.start - b.start);
-
-  // ── 7. Back-solve next departure + wake-by for the first hard commitment ──
-  const nowMin = (dateISO === todayISO()) ? (new Date().getHours() * 60 + new Date().getMinutes()) : -1;
-  const departures = all.filter(s => s.type === "travel" && s.label.indexOf("home") < 0);
-  let leaveBy = null;
-  for (const d of departures) { if (nowMin < 0 || d.start >= nowMin) { leaveBy = { min: d.start, label: d.label.replace("Travel → ", "") }; break; } }
-  // Wake-by = the latest you can wake and still finish the morning routine (+ any
-  // travel) before your EARLIEST commitment of the day — located or not.
-  let wakeBy = null, firstCommit = null;
-  const earliest = anchored.length ? anchored[0] : null;
-  if (earliest) {
-    const tvMin = (earliest.location && earliest.location.trim() && home) ? travelMin(home, earliest.location, pending, earliest.startMin, dow).min : 0;
-    wakeBy = earliest.startMin - tvMin - mDur;
-    firstCommit = { title: earliest.title, startMin: earliest.startMin, location: earliest.location || "", travelMin: tvMin };
-  }
-  // Does the morning routine genuinely clash with that first commitment?
-  const morningClash = !!(firstCommit && wakeBy != null && wakeBy < wakeMin);
-
-  // Stamp the target date on each travel-prefetch request so predictive traffic
-  // (TomTom departAt) is fetched for the day the leg actually happens — important
-  // for tomorrow's night-before look-ahead, not just today.
-  pending.forEach(p => { if (p && !p.dateISO) p.dateISO = dateISO; });
-
-  const busyMin = all.filter(s => s.type !== "free").reduce((m, s) => m + (s.end - s.start), 0);
+  for (const item of unplaced.filter((i) => !i.quiet))
+    conflicts.push({
+      id: `unplaced:${item.id}`,
+      blockId: item.id,
+      kind: "unplaced",
+      message: `${item.title}: ${item.reason}`,
+    });
+  const expanded = primary.flatMap((b) =>
+    b.type === "workout" && !b.complete && b.postChangeSeconds > 0
+      ? [
+          { ...b, end: b.end - b.postChangeSeconds / 60 },
+          {
+            id: `${b.id}:change`,
+            title: "Cool down and change",
+            type: "transition",
+            start: b.end - b.postChangeSeconds / 60,
+            end: b.end,
+            location: "ratner",
+            parentId: b.id,
+          },
+        ]
+      : [b],
+  );
+  const busy = [...expanded, ...chain.legs];
+  const free = freeIntervals(busy, bounds.wake, bounds.bed).map((i, n) => ({
+    ...i,
+    id: `free:${n}`,
+    type: "free",
+    title: "Free time",
+  }));
   return {
-    date: dateISO, wakeMin, bedMin, mDur, nDur, workMin, dropList,
-    segments: all, conflicts, allDayEvents,
-    leaveBy, wakeBy, firstCommit, morningClash, busyMin, pending,
+    date,
+    ...bounds,
+    routine,
+    primary,
+    segments: ordered([...busy, ...free]),
+    conflicts: [...new Map(conflicts.map((c) => [c.id, c])).values()],
+    unplaced,
+    notes,
+    allDay: events.filter((e) => e.allDay || e.blocks === false),
+    freeMinutes: [...free, ...primary.filter((b) => b.type === "home")].reduce(
+      (n, i) => n + i.end - i.start,
+      0,
+    ),
+    generatedAt: now,
   };
 }
-
-function todayRoutineCount(cfg, dow) { return routineSteps(cfg, dow).length; }

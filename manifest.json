@@ -1,17 +1,37 @@
 {
-  "name": "Day — Life Manager",
+  "name": "Day \u00b7 Campus Planner",
   "short_name": "Day",
-  "description": "Personal day manager: morning & nighttime routines, workout timing, calendar-aware master timeline with travel time and conflict detection.",
+  "description": "Your campus schedule, morning routine, meals, walking and Oly training in one place.",
   "display": "standalone",
   "start_url": "./",
   "scope": "./",
   "orientation": "portrait",
-  "background_color": "#10182b",
-  "theme_color": "#10182b",
+  "background_color": "#f5f4ef",
+  "theme_color": "#183e39",
   "icons": [
-    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
-    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
-    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
-    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
   ]
 }

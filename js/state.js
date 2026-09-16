@@ -1,361 +1,369 @@
-'use strict';
-// ─── Day — Life Manager: state, persistence & Google Drive sync ───────────────
-// Single source of truth. Device-first (localStorage), with optional Google Drive
-// sync of one JSON file (drive.file scope — only ever sees files this app creates).
-
-// Google OAuth. The same token client requests Drive (for sync) and Calendar
-// (read-only) scopes. Paste your client id in Settings; this default is the one
-// from the sister app and only works once its origin is whitelisted in the
-// Google Cloud console (see SETUP.md).
-const DEFAULT_CLIENT_ID = "";
-const GOOGLE_SCOPES =
-  "https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/calendar.readonly";
-const DRIVE_FILENAME = "day_lifemanager.json";
-const CACHE_KEY = "day_cache_v1";
-
-let accessToken = null; // current token (also cached below so reopening stays signed in)
-let tokenClient = null; // GIS token client
-let fileId = null;      // cached Drive file id for in-place PATCH
-let silentMode = false; // true while re-authing in the background — suppresses the "cancelled" toast
-
-// ─── Stay-signed-in token cache ───────────────────────────────────────────────
-// Google access tokens last ~1 hour. We remember that the user linked Google
-// (day_google_linked) and cache the live token with its expiry (day_google_tok)
-// so reopening the app within the hour is instant, and after that we silently
-// re-request a token (no tap) whenever a Google session is still available.
-const TOKKEY = "day_google_tok";
-function googleLinked() { try { return localStorage.getItem("day_google_linked") === "1"; } catch (e) { return false; } }
-function setGoogleLinked(v) { try { v ? localStorage.setItem("day_google_linked", "1") : localStorage.removeItem("day_google_linked"); } catch (e) {} }
-function saveToken(tok, expiresInSec) { try { localStorage.setItem(TOKKEY, JSON.stringify({ t: tok, exp: Date.now() + (expiresInSec || 3600) * 1000 })); } catch (e) {} }
-function loadToken() { try { const o = JSON.parse(localStorage.getItem(TOKKEY)); if (o && o.t && o.exp && Date.now() < o.exp - 60000) return o.t; } catch (e) {} return null; }
-function clearToken() { try { localStorage.removeItem(TOKKEY); } catch (e) {} }
-function dropToken() { accessToken = null; clearToken(); } // a 401 means the token died — forget it
-// Silently re-acquire a token (no UI) for a user who has linked Google before.
-function trySilentConnect() {
-  if (silentMode) return false; // an attempt is already in flight — don't double-fire
-  if (!clientId() || !googleLinked()) return false;
-  if (!initTokenClient()) return false;
-  silentMode = true;
-  setSync("reconnecting…");
-  try { tokenClient.requestAccessToken({ prompt: "" }); return true; } catch (e) { silentMode = false; return false; }
-}
-
-// ─── Personal preset ──────────────────────────────────────────────────────────
-// Jonathan's non-credential defaults — seeded on a fresh install, re-applied once
-// via migration, and re-appliable any time from Settings → "Reset to my preset".
-// Credentials (Google Client ID, Outlook .ics, TomTom key) are deliberately NOT
-// here — they're entered once in Settings and kept out of the public repo.
-const PRESET_SETTINGS = {
-  homeAddress: "1094 Sans Souci Way",
-  gymAddress: "Crunch Chamblee",
-  wakeTime: "08:30",
-  bedTime: "00:45",          // 12:45 AM (after midnight — the timeline rolls it over)
-  nightTime: "20:00",        // nighttime routine usually starts 8:00 PM
-  travelMode: "driving",
+import { validDate, clockMinutes, atMinute, addDays } from "./dates.js";
+import { migrateRun } from "./routines.js";
+export const KEY = "planner_v2",
+  BACKUP = "planner_v2_backup",
+  MIGRATION = "planner_before_campus_v2";
+const object = (v) => v && typeof v === "object" && !Array.isArray(v);
+const assert = (ok, message) => {
+  if (!ok)
+    throw Error(
+      `Saved data is invalid: ${message}. Existing copies are preserved.`,
+    );
 };
-const PRESET_WORKOUT = {
-  departTime: "15:00",       // leave the house for the gym ~3:00 PM
-  days: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"], // all 7 — the program's own rest days decide
-};
-function applyPreset() {
-  Object.assign(DATA.settings, PRESET_SETTINGS);
-  // Clone days[] so toggling training days never mutates the PRESET_WORKOUT
-  // constant (which would corrupt a later "Reset to my preset").
-  Object.assign(DATA.workout, PRESET_WORKOUT, { days: PRESET_WORKOUT.days.slice() });
-}
-
-// ─── Data model ───────────────────────────────────────────────────────────────
-let DATA = defaultData();
-function defaultData() {
+export function defaults() {
   return {
-    version: 1,
-    updated: null,
-    migratedNoWorkBlocks: false, // one-time: drop website/content from morning routine
-    presetApplied: false,        // one-time: seed Jonathan's personal preset onto an existing install
-    regeocodedTomTom: false,     // one-time: clear stale geocodes/routes so TomTom re-resolves them
-    // Routines (morning + nighttime) — same timed runner engine.
-    routineConfig: { steps: [] },
-    nightConfig: { steps: [] },
-    routineLog: [],
-    nightLog: [],
-    // Workout duration mirror (no exercise logging — the sister app does that).
-    workout: Object.assign({
-      blockId: 1, weekInBlock: 0, cutting: false,
-    }, PRESET_WORKOUT, { days: PRESET_WORKOUT.days.slice() }),
-    settings: Object.assign({
-      googleClientId: DEFAULT_CLIENT_ID,
-      googleCalEnabled: false,
+    schema: 2,
+    version: 0,
+    updatedAt: 0,
+    settings: {
+      wakeTime: "05:15",
+      googleClientId: "",
       googleCalendarIds: ["primary"],
-      flexCalendarIds: [],          // calendars whose events are flexible work blocks
-      outlookIcsUrl: "",
-      corsProxy: "",                // optional, for Outlook ICS if it blocks CORS
-      tomtomKey: "",                // free TomTom API key for live/predictive traffic (+ geocoding)
-      mapsApiKey: "",               // optional Google key for live/traffic travel time
-      defaultTravelMin: 15,         // fallback buffer when no route can be computed
-      workoutAppUrl: "https://jonathandesta.github.io/oly-tracker/", // embedded in the Workout tab
-    }, PRESET_SETTINGS),
-    olyState: null, // synced snapshot of the embedded workout app: { data:<oly_state>, ts }
-    olyDurations: null, // synced copy of the workout app's published week durations (oly_day_durations)
-    places: {},     // normalizedAddress -> { lat, lon, label, ts }
-    routeCache: {}, // "olat,olon|dlat,dlon|mode" -> { sec, ts }
-    dayPlans: {},   // 'YYYY-MM-DD' -> { wakeTime?, bedTime?, workoutDepart?, workoutSkip?, tasks:[], removedEventIds:[] }
-    calCache: {},   // 'YYYY-MM-DD' -> { google:[], outlook:[], ts }
+      defaultTravelMin: 15,
+      workoutAppUrl: "https://jonathandesta.github.io/oly-tracker/",
+      mealMinutes: { breakfast: 35, lunch: 45, dinner: 45 },
+      routineDurations: {},
+      places: {},
+      routes: {},
+      hours: [],
+      locationOverrides: {},
+    },
+    commitments: [],
+    runs: {},
+    activities: {},
+    routineHistory: [],
+    calCache: {},
+    legacyHistory: { morning: [], night: [] },
+    legacyArchive: null,
   };
 }
-
-// Seed/repair missing keys so older Drive files gain new fields without data loss.
-function normalizeData() {
-  if (!DATA || typeof DATA !== "object") DATA = defaultData();
-  const d = defaultData();
-  for (const k of Object.keys(d)) {
-    if (DATA[k] === undefined) DATA[k] = d[k];
+export function validate(data) {
+  assert(
+    object(data) &&
+      data.schema === 2 &&
+      Number.isInteger(data.version) &&
+      data.version >= 0,
+    "format",
+  );
+  const s = structuredClone(data);
+  assert(
+    object(s.settings) && clockMinutes(s.settings.wakeTime) !== null,
+    "wake time",
+  );
+  assert(
+    Array.isArray(s.settings.googleCalendarIds) &&
+      s.settings.googleCalendarIds.every(
+        (id) => typeof id === "string" && id.trim(),
+      ),
+    "calendar selection",
+  );
+  for (const key of [
+    "routes",
+    "places",
+    "routineDurations",
+    "locationOverrides",
+    "mealMinutes",
+  ])
+    assert(object(s.settings[key]), key);
+  assert(
+    Object.values(s.settings.routineDurations).every(
+      (v) => Number.isFinite(v) && v >= 10 && v <= 3600,
+    ),
+    "routine durations",
+  );
+  assert(
+    s.settings.routineDurations.cold === undefined ||
+      s.settings.routineDurations.cold === 180,
+    "three-minute cold shower",
+  );
+  assert(
+    Object.values(s.settings.mealMinutes).every(
+      (v) => Number.isFinite(v) && v >= 5 && v <= 180,
+    ),
+    "meal durations",
+  );
+  assert(
+    Object.values(s.settings.routes).every(
+      (r) =>
+        object(r) &&
+        Number.isFinite(r.minutes) &&
+        r.minutes > 0 &&
+        r.minutes <= 240,
+    ),
+    "walking routes",
+  );
+  assert(
+    Array.isArray(s.settings.hours) &&
+      s.settings.hours.every(
+        (h) =>
+          object(h) &&
+          typeof h.place === "string" &&
+          validDate(h.from) &&
+          validDate(h.until) &&
+          h.from <= h.until &&
+          Array.isArray(h.intervals) &&
+          h.intervals.every(
+            (i) =>
+              Array.isArray(i) &&
+              i.length === 2 &&
+              Number.isFinite(i[0]) &&
+              Number.isFinite(i[1]) &&
+              i[0] >= 0 &&
+              i[1] <= 1440 &&
+              i[0] < i[1],
+          ),
+      ),
+    "facility hours",
+  );
+  assert(Array.isArray(s.commitments), "commitments");
+  const ids = new Set();
+  for (const c of s.commitments) {
+    assert(
+      object(c) &&
+        typeof c.id === "string" &&
+        !ids.has(c.id) &&
+        typeof c.title === "string" &&
+        c.title.trim() &&
+        validDate(c.date),
+      "commitment identity",
+    );
+    ids.add(c.id);
+    assert(
+      Number.isFinite(c.duration) &&
+        c.duration > 0 &&
+        c.duration <= 1440 &&
+        typeof c.location === "string",
+      "commitment duration or location",
+    );
+    assert(
+      c.fixedStart === null ||
+        (Number.isFinite(c.fixedStart) &&
+          c.fixedStart >= 0 &&
+          c.fixedStart < 1440),
+      "fixed commitment time",
+    );
+    if (c.fixedStart === null)
+      assert(
+        Number.isFinite(c.earliest) &&
+          Number.isFinite(c.latest) &&
+          c.earliest >= 0 &&
+          c.latest <= 1440 &&
+          c.earliest < c.latest,
+        "flexible commitment window",
+      );
   }
-  // deep-fill settings & workout so newly added options appear
-  DATA.settings = Object.assign({}, d.settings, DATA.settings || {});
-  DATA.workout = Object.assign({}, d.workout, DATA.workout || {});
-
-  // Routine configs: (re)seed when missing or when the seed version bumps.
-  const rc = DATA.routineConfig;
-  if (!rc || !Array.isArray(rc.steps) || !rc.steps.length || rc.v !== ROUTINE_VERSION) {
-    DATA.routineConfig = {
-      v: ROUTINE_VERSION,
-      steps: ROUTINE_SEED.map(s => Object.assign({}, s)),
-      transitionSec: (rc && typeof rc.transitionSec === "number") ? rc.transitionSec : 45,
+  for (const k of ["runs", "activities", "calCache"]) assert(object(s[k]), k);
+  for (const run of Object.values(s.runs)) {
+    assert(
+      object(run) &&
+        run.schema === 1 &&
+        validDate(run.date) &&
+        Array.isArray(run.steps) &&
+        Array.isArray(run.completed) &&
+        Number.isInteger(run.index) &&
+        run.index >= 0 &&
+        run.index <= run.steps.length &&
+        run.completed.length === run.index,
+      "morning progress",
+    );
+    assert(
+      Number.isFinite(run.startedAt) &&
+        Number.isFinite(run.currentStartedAt) &&
+        Number.isFinite(run.pausedMs) &&
+        run.pausedMs >= 0 &&
+        (run.pausedAt === null || Number.isFinite(run.pausedAt)),
+      "morning timer",
+    );
+    assert(
+      run.steps.every(
+        (step) =>
+          typeof step.id === "string" &&
+          typeof step.title === "string" &&
+          Number.isFinite(step.seconds) &&
+          step.seconds >= 0,
+      ),
+      "morning steps",
+    );
+  }
+  for (const a of Object.values(s.activities))
+    assert(
+      object(a) &&
+        ["active", "complete", "replan"].includes(a.status) &&
+        (a.status === "replan" || Number.isFinite(a.startedAt)) &&
+        (a.status !== "complete" ||
+          (Number.isFinite(a.endedAt) && a.endedAt >= a.startedAt)),
+      "activity progress",
+    );
+  assert(Array.isArray(s.routineHistory), "routine history");
+  return s;
+}
+export function migrateLegacy(old, oldRun) {
+  const s = defaults();
+  s.legacyArchive = old || null;
+  for (const key of [
+    "googleClientId",
+    "tomtomKey",
+    "mapsApiKey",
+    "workoutAppUrl",
+  ])
+    if (typeof old?.settings?.[key] === "string")
+      s.settings[key] = old.settings[key];
+  if (old?.settings?.googleCalendarIds?.length)
+    s.settings.googleCalendarIds = old.settings.googleCalendarIds;
+  s.legacyHistory = {
+    morning: old?.routineLog || [],
+    night: old?.nightLog || [],
+  };
+  for (const [date, plan] of Object.entries(old?.dayPlans || {})) {
+    if (!validDate(date)) continue;
+    for (const [index, c] of (plan.tasks || []).entries()) {
+      const fixedStart = clockMinutes(c.fixedStart);
+      s.commitments.push({
+        id: `migrated:${date}:${c.id || index}`,
+        date,
+        title: c.name || c.title || "Saved commitment",
+        location: c.location || "grossman",
+        duration: Number.isFinite(c.durMin) && c.durMin > 0 ? c.durMin : 30,
+        fixedStart,
+        earliest: 315,
+        latest: 1335,
+      });
+    }
+  }
+  const events = [];
+  for (const [date, cache] of Object.entries(old?.calCache || {}))
+    if (validDate(date))
+      for (const e of cache.google || []) {
+        if (!Number.isFinite(e.startMin) || !Number.isFinite(e.endMin))
+          continue;
+        events.push({
+          id: `legacy:${date}:${e.id}`,
+          title: e.title || "Calendar commitment",
+          location: e.location || "",
+          start: atMinute(date, e.startMin),
+          end: atMinute(date, e.endMin),
+          allDay: !!e.allDay,
+          blocks: !e.allDay,
+          source: "google",
+          legacy: true,
+          date,
+        });
+      }
+  if (events.length)
+    s.calCache.legacy = {
+      events,
+      updatedAt: Math.max(
+        0,
+        ...Object.values(old.calCache).map((c) => c.ts || 0),
+      ),
+      legacy: true,
+    };
+  const run = migrateRun(oldRun);
+  if (run) s.runs[run.date] = run;
+  return validate(s);
+}
+export function loadState(storage) {
+  const errors = [];
+  for (const key of [KEY, BACKUP]) {
+    const raw = storage.getItem(key);
+    if (!raw) continue;
+    try {
+      return {
+        state: validate(JSON.parse(raw)),
+        recovered: key === BACKUP,
+        message: errors.join(" "),
+      };
+    } catch (e) {
+      errors.push(e.message);
+    }
+  }
+  if (errors.length) throw Error(errors.join(" "));
+  const raw = storage.getItem("day_cache_v1"),
+    run = storage.getItem("day_morning_run_v1");
+  if (raw || run) {
+    storage.setItem(
+      MIGRATION,
+      JSON.stringify({
+        savedAt: Date.now(),
+        raw,
+        run,
+        nightRun: storage.getItem("day_night_run_v1"),
+      }),
+    );
+    const state = migrateLegacy(
+      raw ? JSON.parse(raw) : null,
+      run ? JSON.parse(run) : null,
+    );
+    storage.setItem(KEY, JSON.stringify(state));
+    return {
+      state,
+      migrated: true,
+      message:
+        "Previous data backed up. Campus defaults applied; past routines remain in your backup.",
     };
   }
-  if (typeof DATA.routineConfig.transitionSec !== "number") DATA.routineConfig.transitionSec = 45;
-
-  const nc = DATA.nightConfig;
-  if (!nc || !Array.isArray(nc.steps) || !nc.steps.length || nc.v !== NIGHT_VERSION) {
-    DATA.nightConfig = {
-      v: NIGHT_VERSION,
-      steps: NIGHT_SEED.map(s => Object.assign({}, s)),
-      transitionSec: (nc && typeof nc.transitionSec === "number") ? nc.transitionSec : 45,
-    };
-  }
-  if (typeof DATA.nightConfig.transitionSec !== "number") DATA.nightConfig.transitionSec = 45;
-
-  // One-time: push the personal preset onto an existing install (non-credential
-  // fields only — never touches Google Client ID / Outlook URL / TomTom key).
-  if (!DATA.presetApplied) {
-    applyPreset();
-    DATA.presetApplied = true;
-  }
-
-  // One-time removal of the website/content blocks from the morning routine
-  // (kept as edits to existing data so other custom tweaks survive).
-  if (!DATA.migratedNoWorkBlocks) {
-    if (DATA.routineConfig && Array.isArray(DATA.routineConfig.steps))
-      DATA.routineConfig.steps = DATA.routineConfig.steps.filter(s => s.id !== "website" && s.id !== "content");
-    DATA.migratedNoWorkBlocks = true;
-  }
-
-  // One-time: drop geocodes/routes cached under the old free-geocoder + heuristic
-  // so addresses re-resolve through TomTom and travel times become real-traffic.
-  if (!DATA.regeocodedTomTom) {
-    DATA.places = {};
-    DATA.routeCache = {};
-    DATA.regeocodedTomTom = true;
-  }
-
-  if (!Array.isArray(DATA.routineLog)) DATA.routineLog = [];
-  if (!Array.isArray(DATA.nightLog)) DATA.nightLog = [];
-  if (!DATA.places || typeof DATA.places !== "object") DATA.places = {};
-  if (!DATA.routeCache || typeof DATA.routeCache !== "object") DATA.routeCache = {};
-  if (!DATA.dayPlans || typeof DATA.dayPlans !== "object") DATA.dayPlans = {};
-  if (!DATA.calCache || typeof DATA.calCache !== "object") DATA.calCache = {};
-
-  // Housekeeping: drop per-day plans/caches safely in the past so the synced
-  // file doesn't grow forever (viewing any day auto-creates a dayPlan entry;
-  // calendar events re-fetch on demand; routine history lives in the logs).
-  const planCutoff = isoForOffset(-14), calCutoff = isoForOffset(-2);
-  for (const k of Object.keys(DATA.dayPlans)) if (k < planCutoff) delete DATA.dayPlans[k];
-  for (const k of Object.keys(DATA.calCache)) if (k < calCutoff) delete DATA.calCache[k];
+  return { state: defaults(), message: "" };
 }
-
-// Per-day plan accessor (ad-hoc tasks, one-off overrides).
-function dayPlan(dateISO) {
-  if (!DATA.dayPlans[dateISO]) {
-    DATA.dayPlans[dateISO] = { tasks: [], removedEventIds: [] };
+export function saveState(storage, state, expectedVersion = state.version) {
+  const old = storage.getItem(KEY);
+  if (old) {
+    try {
+      const existing = validate(JSON.parse(old));
+      if (existing.version !== expectedVersion)
+        throw Error("Another tab changed Planner. Reload before editing.");
+    } catch (e) {
+      if (e.message.startsWith("Another")) throw e;
+    }
   }
-  const p = DATA.dayPlans[dateISO];
-  if (!Array.isArray(p.tasks)) p.tasks = [];
-  if (!Array.isArray(p.removedEventIds)) p.removedEventIds = [];
-  return p;
-}
-
-// ─── Persistence ──────────────────────────────────────────────────────────────
-function saveLocal() {
-  try { localStorage.setItem(CACHE_KEY, JSON.stringify(DATA)); } catch (e) {}
-}
-function loadLocal() {
-  try {
-    const raw = localStorage.getItem(CACHE_KEY);
-    if (raw) DATA = JSON.parse(raw);
-  } catch (e) {}
-}
-
-// Persist everywhere: device first (instant, never lost), then Drive if connected.
-function persist(okMsg) {
-  DATA.updated = new Date().toISOString();
-  saveLocal();
-  setSync("syncing…");
-  saveDrive()
-    .then(() => { setSync("synced ✓", "ok"); if (okMsg) toast(okMsg + " · synced"); })
-    .catch(() => {
-      setSync("saved on device", "warn"); if (okMsg) toast(okMsg + " · sync retry next save");
-      // token may have expired mid-session — quietly refresh it for the next save
-      if (!accessToken && googleLinked() && gisAvailable()) trySilentConnect();
-    });
-}
-
-// ─── Google Identity Services ─────────────────────────────────────────────────
-function clientId() { return (DATA.settings.googleClientId || DEFAULT_CLIENT_ID || "").trim(); }
-function gisAvailable() { return !!(window.google && google.accounts && google.accounts.oauth2); }
-function initTokenClient() {
-  if (tokenClient || !gisAvailable() || !clientId()) return tokenClient;
-  tokenClient = google.accounts.oauth2.initTokenClient({
-    client_id: clientId(),
-    scope: GOOGLE_SCOPES,
-    callback: (resp) => {
-      if (resp && resp.access_token) {
-        accessToken = resp.access_token;
-        saveToken(resp.access_token, resp.expires_in);
-        setGoogleLinked(true); silentMode = false;
-        onConnected();
-      } else setSync("connect Google", "warn");
-    },
-    error_callback: () => { setSync("connect Google", "warn"); if (!silentMode) toast("Sign-in cancelled"); silentMode = false; },
+  const next = validate({
+    ...state,
+    version: expectedVersion + 1,
+    updatedAt: Date.now(),
   });
-  return tokenClient;
-}
-function connectGoogle() {
-  if (!clientId()) { toast("Add your Google Client ID in Settings"); return; }
-  if (!initTokenClient()) { toast("Google library still loading — try again"); return; }
-  setSync("connecting…");
-  // Only a never-linked user needs the consent screen; a returning user gets the
-  // no-prompt flow (popup auto-closes when a Google session already exists).
-  tokenClient.requestAccessToken({ prompt: googleLinked() ? "" : "consent" });
-}
-async function onConnected() {
-  setSync("syncing…");
-  try {
-    await findFile();
-    const remote = await loadDrive();
-    if (remote) reconcile(remote);
-    else await saveDrive();
-    setSync("synced ✓", "ok");
-    if (typeof render === "function") render();
-    if (DATA.settings.googleCalEnabled && typeof refreshCalendars === "function") refreshCalendars();
-    if (typeof pullOlySync === "function") pullOlySync().catch(() => {});
-  } catch (e) {
-    setSync("offline · using device", "warn");
-    if (!accessToken && googleLinked() && gisAvailable()) trySilentConnect();
+  if (old) {
+    try {
+      validate(JSON.parse(old));
+      storage.setItem(BACKUP, old);
+    } catch (e) {
+      if (e.name === "QuotaExceededError") throw e;
+    }
   }
+  storage.setItem(KEY, JSON.stringify(next));
+  return next;
 }
-function reconcile(remote) {
-  const localU = DATA.updated ? Date.parse(DATA.updated) : 0;
-  const remoteU = remote.updated ? Date.parse(remote.updated) : 0;
-  if (remoteU >= localU) {
-    DATA = remote; normalizeData(); saveLocal();
-    // a newer remote may carry newer workout-app data → push it into shared storage
-    if (typeof seedOlyDown === "function") seedOlyDown();
-  } else saveDrive().catch(() => {});
+export function plannerEntities(state) {
+  const s = state.settings,
+    entities = {
+      preferences: Object.fromEntries(
+        Object.entries(s).filter(
+          ([k]) => !["googleClientId", "tomtomKey", "mapsApiKey"].includes(k),
+        ),
+      ),
+      legacyHistory: state.legacyHistory,
+    };
+  for (const c of state.commitments) entities[`commitment:${c.id}`] = c;
+  for (const [date, r] of Object.entries(state.runs))
+    entities[`routine:${date}`] = r;
+  for (const [id, a] of Object.entries(state.activities))
+    entities[`activity:${id}`] = a;
+  for (const r of state.routineHistory)
+    entities[`history:${r.id || r.date}`] = r;
+  return entities;
 }
-
-// ─── Drive file CRUD ──────────────────────────────────────────────────────────
-async function findFile() {
-  if (!accessToken) throw new Error("no token");
-  const q = "name='" + DRIVE_FILENAME + "' and trashed=false";
-  const url = "https://www.googleapis.com/drive/v3/files?q=" + encodeURIComponent(q) +
-    "&spaces=drive&fields=files(id,modifiedTime)";
-  const r = await fetch(url, { headers: { Authorization: "Bearer " + accessToken } });
-  if (r.status === 401) { dropToken(); throw new Error("token expired"); }
-  if (!r.ok) throw new Error("find " + r.status);
-  const j = await r.json();
-  fileId = (j.files && j.files.length) ? j.files[0].id : null;
-  return fileId;
-}
-async function loadDrive() {
-  if (!accessToken) throw new Error("no token");
-  if (fileId === null) await findFile();
-  if (!fileId) return null;
-  const r = await fetch("https://www.googleapis.com/drive/v3/files/" + fileId + "?alt=media",
-    { headers: { Authorization: "Bearer " + accessToken } });
-  if (r.status === 401) { dropToken(); throw new Error("token expired"); }
-  if (!r.ok) throw new Error("load " + r.status);
-  return await r.json();
-}
-async function saveDrive() {
-  saveLocal();
-  if (!accessToken) throw new Error("no token");
-  const body = JSON.stringify(DATA);
-  if (!fileId) {
-    const boundary = "day_" + Date.now();
-    const multipart =
-      "--" + boundary + "\r\n" +
-      "Content-Type: application/json; charset=UTF-8\r\n\r\n" +
-      JSON.stringify({ name: DRIVE_FILENAME }) + "\r\n" +
-      "--" + boundary + "\r\n" +
-      "Content-Type: application/json; charset=UTF-8\r\n\r\n" +
-      body + "\r\n" +
-      "--" + boundary + "--";
-    const r = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id", {
-      method: "POST",
-      headers: { Authorization: "Bearer " + accessToken, "Content-Type": "multipart/related; boundary=" + boundary },
-      body: multipart,
-    });
-    if (r.status === 401) { dropToken(); throw new Error("token expired"); }
-    if (!r.ok) throw new Error("create " + r.status);
-    const j = await r.json();
-    fileId = j.id;
-  } else {
-    const r = await fetch("https://www.googleapis.com/upload/drive/v3/files/" + fileId + "?uploadType=media", {
-      method: "PATCH",
-      headers: { Authorization: "Bearer " + accessToken, "Content-Type": "application/json; charset=UTF-8" },
-      body: body,
-    });
-    if (r.status === 401) { dropToken(); throw new Error("token expired"); }
-    if (!r.ok) throw new Error("save " + r.status);
-  }
-}
-
-// ─── Tiny shared helpers ──────────────────────────────────────────────────────
-const $ = s => document.querySelector(s);
-const $$ = s => Array.from(document.querySelectorAll(s));
-const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-function todayISO() {
-  const d = new Date();
-  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
-}
-function todayDOW() { return DOW[new Date().getDay()]; }
-function isoForOffset(days) {
-  const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() + days);
-  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
-}
-function tomorrowISO() { return isoForOffset(1); }
-function dowForISO(iso) { return DOW[new Date(iso + "T00:00:00").getDay()]; }
-function setSync(t, cls) { const e = $("#sync"); if (e) { e.textContent = t; e.className = "sync" + (cls ? " " + cls : ""); } }
-function toast(t) { const e = $("#toast"); if (!e) return; e.textContent = t; e.classList.add("show"); setTimeout(() => e.classList.remove("show"), 2400); }
-function fmtSec(s) { s = Math.max(0, Math.round(s)); const m = Math.floor(s / 60); return m + ":" + String(s % 60).padStart(2, "0"); }
-function fmtSigned(s) { const neg = s < 0, a = Math.abs(Math.round(s)); return (neg ? "-" : "") + Math.floor(a / 60) + ":" + String(a % 60).padStart(2, "0"); }
-function escapeHtml(s) { return String(s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])); }
-function escapeAttr(s) { return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
-// "HH:MM" <-> minutes since midnight
-function hmToMin(hm) { if (!hm || !/^\d{1,2}:\d{2}$/.test(hm)) return null; const [h, m] = hm.split(":").map(Number); return h * 60 + m; }
-function minToHM(min) {
-  min = ((Math.round(min) % 1440) + 1440) % 1440;
-  const h = Math.floor(min / 60), m = min % 60;
-  return String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0");
-}
-// 12-hour clock label, e.g. 195 -> "3:15 AM", 915 -> "3:15 PM"
-function fmtClock(min) {
-  min = Math.round(min);
-  let day = "";
-  if (min >= 1440) { day = " (+1)"; min -= 1440; }
-  if (min < 0) { day = " (−1)"; min += 1440; }
-  let h = Math.floor(min / 60), m = min % 60;
-  const ap = h >= 12 ? "PM" : "AM";
-  h = h % 12; if (h === 0) h = 12;
-  return h + ":" + String(m).padStart(2, "0") + " " + ap + day;
+export function adoptPlannerEntities(state, entities) {
+  if (!object(entities.preferences))
+    throw Error("Cloud preferences are missing; local data is preserved.");
+  const pairs = (prefix) =>
+    Object.entries(entities)
+      .filter(([key]) => key.startsWith(prefix))
+      .map(([key, value]) => [key.slice(prefix.length), value]);
+  return validate({
+    ...state,
+    settings: { ...state.settings, ...entities.preferences },
+    commitments: pairs("commitment:").map(([, v]) => v),
+    runs: Object.fromEntries(pairs("routine:")),
+    activities: Object.fromEntries(pairs("activity:")),
+    routineHistory: pairs("history:").map(([, v]) => v),
+    legacyHistory: entities.legacyHistory || state.legacyHistory,
+  });
 }
