@@ -526,3 +526,33 @@ test("expired Google authorization needs explicit reconnection without exposing 
   auth.disconnect();
   assert.equal(storage.getItem("campus_google_token_v1"), null);
 });
+
+test("overruns release contradicted earlier placements while recorded completion remains pinned", () => {
+  const date = "2026-09-29",
+    wake = atMinute(date, 315) * 60000,
+    now = atMinute(date, 450) * 60000;
+  const before = scheduleDay({ date, now: wake });
+  const run = startRun(date, wake);
+  const delayed = scheduleDay({ date, run, now, previous: before.primary });
+  const breakfast = delayed.primary.find((b) => b.meal === "breakfast");
+  assert(breakfast.start >= delayed.routine.at(-1).end);
+  assert(!breakfast.earlierPlan);
+  assert(!breakfast.complete);
+  const old = before.primary.find((b) => b.meal === "breakfast");
+  const recorded = scheduleDay({
+    date,
+    run,
+    now,
+    previous: before.primary,
+    activities: {
+      [old.id]: {
+        status: "complete",
+        startedAt: old.start * 60000,
+        endedAt: old.end * 60000,
+        location: old.location,
+      },
+    },
+  });
+  assert.equal(recorded.primary.find((b) => b.id === old.id).start, old.start);
+  assert(recorded.conflicts.some((c) => c.kind === "overlap"));
+});

@@ -434,10 +434,25 @@ export function scheduleDay({
         complete: activity.status === "complete",
         active: activity.status === "active",
       });
-    } else if (old && activity?.status !== "replan")
+    } else if (
+      old &&
+      activity?.status !== "replan" &&
+      validInsertion(
+        fixed,
+        old,
+        bounds,
+        settings,
+        new Map(
+          travelChain(fixed, bounds, settings).issues.map((issue) => [
+            issue.id,
+            issue.minutes,
+          ]),
+        ),
+      )
+    )
       fixed.push({ ...old, fixed: true, earlierPlan: true });
     else {
-      if (activity?.status === "replan" && date === dateISO(now))
+      if ((old || activity?.status === "replan") && date === dateISO(now))
         item.from = Math.max(item.from, now / 60000);
       pending.push(item);
     }

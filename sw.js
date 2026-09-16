@@ -1,4 +1,4 @@
-const CACHE = "day-campus-v2-0";
+const CACHE = "day-campus-v2-0-1";
 const BASE = new URL("./", self.location.href).pathname;
 const FILES = [
   "./",

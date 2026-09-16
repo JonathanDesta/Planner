@@ -40,6 +40,6 @@ Oly retains the source-prescription and complete-program regression suites, adds
 
 Manual screenshot review covered readable contrast, expandable timing details, bottom navigation, focus restoration, touch targets and preserved embedded state. A 320-pixel intrinsic form-width defect and a search-pruning defect that hid feasible alternate dining were fixed during this audit.
 
-The final suites passed 17 Planner and 114 Oly Node tests, all nine existing Oly browser scripts, and both Planner browser scripts under Chrome and WebKit. WebKit cold-offline verification stops the origin server because its protocol-level offline flag rejects navigation before consulting the service worker.
+The final suites passed 18 Planner and 114 Oly Node tests, all nine existing Oly browser scripts, and both Planner browser scripts under Chrome and WebKit. WebKit cold-offline verification stops the origin server because its protocol-level offline flag rejects navigation before consulting the service worker.
 
 Live Google consent cannot be automated on behalf of a disconnected device. The code can queue edits offline, but cannot promise synchronization while an iPhone app is closed. See [Google token behavior](https://developers.google.com/identity/oauth2/web/guides/use-token-model).
