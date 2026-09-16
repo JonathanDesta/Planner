@@ -1,4 +1,4 @@
-const CACHE = "day-campus-v2-0-1";
+const CACHE = "day-campus-v2-0-1-fresh";
 const BASE = new URL("./", self.location.href).pathname;
 const FILES = [
   "./",
@@ -20,7 +20,13 @@ const FILES = [
   "js/google-auth.js",
 ];
 self.addEventListener("install", (event) =>
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(FILES))),
+  event.waitUntil(
+    caches
+      .open(CACHE)
+      .then((cache) =>
+        cache.addAll(FILES.map((url) => new Request(url, { cache: "reload" }))),
+      ),
+  ),
 );
 self.addEventListener("message", (event) => {
   if (event.data?.type === "ACTIVATE_UPDATE")
