@@ -78,7 +78,7 @@ test("exact routine budgets, sequence, two-week anchor and Sunday vacuum recurre
     ["2026-09-23", 70],
     ["2026-09-24", 108],
     ["2026-09-25", 70],
-    ["2026-09-26", 70],
+    ["2026-09-26", 80],
     ["2026-09-20", 110],
     ["2026-09-27", 82],
     ["2026-10-04", 110],
@@ -101,6 +101,7 @@ test("exact routine budgets, sequence, two-week anchor and Sunday vacuum recurre
     ["2026-09-21", "6:10 AM", "6:25 AM"],
     ["2026-09-22", "6:20 AM", "6:35 AM"],
     ["2026-09-24", "6:48 AM", "7:03 AM"],
+    ["2026-09-26", "6:20 AM", "6:35 AM"],
   ]) {
     const blocks = routineBlocks(date, atMinute(date, 315));
     assert.equal(
@@ -111,12 +112,12 @@ test("exact routine budgets, sequence, two-week anchor and Sunday vacuum recurre
     assert(!blocks.some((s) => s.id === "morning:bathroom-wait"));
   }
 });
-test("hair is Thursday only; Tuesday and Thursday shave once after the final shower exit before skincare", () => {
+test("hair is Thursday only; Tuesday, Thursday and Saturday shave once after the final shower exit before skincare", () => {
   for (let day = 0; day < 14; day++) {
     const date = addDays("2026-09-20", day),
       steps = morningSteps(date).map((s) => s.id),
       hair = weekday(date) === 4,
-      shave = [2, 4].includes(weekday(date));
+      shave = [2, 4, 6].includes(weekday(date));
     for (const id of [
       "shampoo",
       "masque",

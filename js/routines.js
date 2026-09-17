@@ -9,7 +9,7 @@ export function groomingSunday(date) {
 }
 export function morningSteps(date, overrides = {}) {
   const hair = weekday(date) === 4,
-    shave = [2, 4].includes(weekday(date)),
+    shave = [2, 4, 6].includes(weekday(date)),
     grooming = groomingSunday(date),
     steps = [];
   const step = (id, title, minutes, resource = "dorm", extra = {}) =>
