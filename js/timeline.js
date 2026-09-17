@@ -1,4 +1,10 @@
-import { atMinute, sleepBounds, formatTime, dateISO } from "./dates.js";
+import {
+  atMinute,
+  sleepBounds,
+  formatTime,
+  dateISO,
+  weekday,
+} from "./dates.js";
 import { routineBlocks } from "./routines.js";
 import { travelBetween, resolvePlace } from "./travel.js";
 import { facilityHours, insideHours } from "./facilities.js";
@@ -362,11 +368,7 @@ export function scheduleDay({
       until: bounds.bed,
       preferred: atMinute(
         date,
-        workout.day === "tuesday"
-          ? 930
-          : workout.day === "thursday"
-            ? 1140
-            : 660,
+        weekday(date) === 2 ? 930 : weekday(date) === 4 ? 1140 : 660,
       ),
     };
     if (workout.active && workout.startedAt)

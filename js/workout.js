@@ -80,6 +80,6 @@ export function workoutForDate(feed, date) {
     startedAt: null,
     endedAt: null,
     activeRemainingSeconds: null,
-    note: "Current Oly dose projected; program weeks advance only in Oly.",
+    note: "Current Oly dose and rolling A–B–rest–C–D–rest–rest calendar projected; program weeks advance only in Oly.",
   };
 }

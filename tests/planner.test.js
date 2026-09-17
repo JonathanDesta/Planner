@@ -489,6 +489,56 @@ test("projected weeks retain Mon/Tue/Thu/Fri, one visit daily and four weekly", 
   assert.throws(() => validateFeed(invalid), /invalid/);
 });
 
+test("every rotated calendar preserves four visits, recovery gaps and bench spacing across the year", async () => {
+  const { fresh, deferDay } = await import("../../oly-tracker/src/training.js");
+  const { buildPlannerFeed } = await import(
+    "../../oly-tracker/src/planner-feed.js"
+  );
+  for (let rotation = 0; rotation < 7; rotation++) {
+    const state = fresh("2026-12-28");
+    deferDay(state, "monday", addDays(state.weekStart, rotation));
+    const feed = buildPlannerFeed(state);
+    for (let week = 0; week < 52; week++) {
+      const start = addDays(feed.repeatStart, 7 * week);
+      const slots = Array.from({ length: 7 }, (_, n) =>
+        workoutForDate(feed, addDays(start, n)),
+      );
+      assert.deepEqual(
+        slots.map((s) => s?.day || null),
+        ["monday", "tuesday", null, "thursday", "friday", null, null],
+      );
+      assert.equal(
+        slots.filter(Boolean).reduce((n, s) => n + s.visits, 0),
+        4,
+      );
+      const b = atMinute(slots[1].date, 780),
+        d = atMinute(slots[4].date, 780);
+      assert(d - b >= 71 * 60 && d - b <= 73 * 60);
+      const nextB = atMinute(addDays(start, 8), 780);
+      assert(nextB - d >= 95 * 60 && nextB - d <= 97 * 60);
+    }
+  }
+});
+
+test("a C session moved to Friday uses Friday availability instead of a Thursday evening preference", () => {
+  const date = "2026-10-09";
+  const result = scheduleDay({
+    date,
+    workout: {
+      day: "thursday",
+      label: "Workout C",
+      forecastSeconds: 90 * 60,
+      postChangeSeconds: 600,
+      visits: 1,
+      basis: "model",
+    },
+  });
+  const visit = result.primary.find((b) => b.type === "workout");
+  assert(visit);
+  assert(visit.end <= atMinute(date, 17 * 60));
+  assert.deepEqual(result.conflicts, []);
+});
+
 test("a late morning reserves the bathroom after cleaning and keeps an actual overrun visible", () => {
   const date = "2026-09-28",
     late = atMinute(date, 360) * 60000;
