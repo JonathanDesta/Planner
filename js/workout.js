@@ -26,12 +26,29 @@ export function validateFeed(feed) {
     );
   const days = new Set(),
     dates = new Set();
+  const allDays = [
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "sunday",
+  ];
+  if (
+    feed.repeatDays !== undefined &&
+    (!Array.isArray(feed.repeatDays) ||
+      feed.repeatDays.length !== 7 ||
+      new Set(feed.repeatDays).size !== 7 ||
+      feed.repeatDays.some((d) => !allDays.includes(d)))
+  )
+    throw Error("Invalid workout calendar order.");
   if (feed.repeatStart && !validDate(feed.repeatStart))
     throw Error("Invalid workout projection date.");
   for (const e of feed.entries) {
     if (
       !validDate(e.date) ||
-      !["monday", "tuesday", "thursday", "friday"].includes(e.day) ||
+      !allDays.includes(e.day) ||
       days.has(e.day) ||
       dates.has(e.date) ||
       typeof e.label !== "string" ||
@@ -43,6 +60,8 @@ export function validateFeed(feed) {
       e.postChangeSeconds > 3600 ||
       typeof e.active !== "boolean" ||
       typeof e.complete !== "boolean" ||
+      (e.notBefore != null &&
+        (!Number.isFinite(e.notBefore) || e.notBefore < 0)) ||
       (e.active &&
         (!Number.isFinite(e.startedAt) ||
           !Number.isFinite(e.activeRemainingSeconds) ||
@@ -65,9 +84,15 @@ export function workoutForDate(feed, date) {
   if (!feed.repeatStart || date < feed.repeatStart) return null;
   const offset = dayDifference(date, feed.repeatStart),
     position = offset % 7;
-  const day = ["monday", "tuesday", null, "thursday", "friday", null, null][
-    position
-  ];
+  const day = (feed.repeatDays || [
+    "monday",
+    "tuesday",
+    null,
+    "thursday",
+    "friday",
+    null,
+    null,
+  ])[position];
   const template = feed.entries.find((e) => e.day === day);
   if (!template) return null;
   return {
@@ -80,6 +105,7 @@ export function workoutForDate(feed, date) {
     startedAt: null,
     endedAt: null,
     activeRemainingSeconds: null,
-    note: "Current Oly dose and rolling A–B–rest–C–D–rest–rest calendar projected; program weeks advance only in Oly.",
+    notBefore: null,
+    note: `Current Oly dose and ${feed.program.scheduleName || "rolling A–B–rest–C–D–rest–rest calendar"} projected; program weeks advance only in Oly.`,
   };
 }

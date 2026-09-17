@@ -23,3 +23,5 @@ For Safari-engine checks, install WebKit with `npx playwright install webkit` an
 The development server exposes `/Planner/` and `/oly-tracker/` on the same origin. Test fixtures use isolated browser contexts and simulated Google responses. They never write to a real Google account.
 
 See [Setup](SETUP.md), [Architecture and audit](HANDOFF.md) and [Release workflow](WORKFLOW.md).
+
+Planner 2.0.3 follows Oly’s explicit weekday schedule (Mon B / Tue C / Thu A / Fri D), retains the separate test-week Saturday bench, and respects actual logged bench eligibility when placing current sessions. It does not change Oly prescriptions or write Calendar events.

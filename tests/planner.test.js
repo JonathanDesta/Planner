@@ -470,7 +470,7 @@ test("projected weeks retain Mon/Tue/Thu/Fri, one visit daily and four weekly", 
       "../../oly-tracker/src/planner-feed.js"
     ),
     { validateFeed } = await import("../js/workout.js");
-  const feed = validateFeed(buildPlannerFeed(fresh("2026-09-28")));
+  const feed = validateFeed(buildPlannerFeed(fresh("2026-09-28", "source")));
   for (let week = 1; week <= 12; week++) {
     const days = [];
     for (let n = 0; n < 7; n++) {
@@ -495,7 +495,7 @@ test("every rotated calendar preserves four visits, recovery gaps and bench spac
     "../../oly-tracker/src/planner-feed.js"
   );
   for (let rotation = 0; rotation < 7; rotation++) {
-    const state = fresh("2026-12-28");
+    const state = fresh("2026-12-28", "source");
     deferDay(state, "monday", addDays(state.weekStart, rotation));
     const feed = buildPlannerFeed(state);
     for (let week = 0; week < 52; week++) {
@@ -605,4 +605,69 @@ test("overruns release contradicted earlier placements while recorded completion
   });
   assert.equal(recorded.primary.find((b) => b.id === old.id).start, old.start);
   assert(recorded.conflicts.some((c) => c.kind === "overlap"));
+});
+
+test("weekday Oly feeds project B/C/A/D, retain shifted dates and include the taper Saturday bench", async () => {
+  const { fresh, deferDay } = await import("../../oly-tracker/src/training.js");
+  const { buildPlannerFeed } = await import(
+    "../../oly-tracker/src/planner-feed.js"
+  );
+  const { validateFeed } = await import("../js/workout.js");
+  for (let offset = 0; offset < 7; offset++) {
+    const s = fresh("2026-12-28");
+    deferDay(s, "tuesday", addDays(s.weekStart, offset));
+    const feed = validateFeed(buildPlannerFeed(s));
+    assert.deepEqual(
+      feed.entries.map((e) => e.label),
+      ["Workout B", "Workout C", "Workout A", "Workout D"],
+    );
+    for (let week = 0; week < 52; week++) {
+      const start = addDays(feed.repeatStart, week * 7);
+      const slots = Array.from({ length: 7 }, (_, i) =>
+        workoutForDate(feed, addDays(start, i)),
+      );
+      assert.deepEqual(
+        slots.map((x) => x?.label || null),
+        ["Workout B", "Workout C", null, "Workout A", "Workout D", null, null],
+      );
+      const b = atMinute(slots[0].date, 780),
+        d = atMinute(slots[4].date, 780),
+        next = atMinute(addDays(start, 7), 780);
+      assert(d - b >= 95 * 60 && d - b <= 97 * 60);
+      assert(next - d >= 71 * 60 && next - d <= 73 * 60);
+    }
+  }
+  const s = fresh("2026-09-28");
+  s.training.week = 12;
+  const feed = validateFeed(buildPlannerFeed(s));
+  assert.equal(workoutForDate(feed, "2026-10-03").label, "Moderate bench");
+  assert.equal(workoutForDate(feed, "2026-10-10").label, "Moderate bench");
+  feed.repeatDays[0] = feed.repeatDays[1];
+  assert.throws(() => validateFeed(feed), /calendar order/);
+});
+
+test("actual bench eligibility delays a planned workout and never forces it into an ineligible day", () => {
+  const date = "2026-09-28",
+    eligible = atMinute(date, 16 * 60),
+    workout = {
+      label: "Workout B",
+      day: "tuesday",
+      forecastSeconds: 3600,
+      postChangeSeconds: 600,
+      basis: "measured",
+      visits: 1,
+      notBefore: eligible * 60000,
+    };
+  const result = scheduleDay({ date, events: classes(date), workout });
+  const gym = result.primary.find((b) => b.type === "workout");
+  assert(gym, "The eligible afternoon workout should fit");
+  assert(gym.start >= eligible);
+  assert.equal(gym.end - gym.start, 70);
+  const blocked = scheduleDay({
+    date,
+    events: classes(date),
+    workout: { ...workout, notBefore: atMinute(addDays(date, 1), 600) * 60000 },
+  });
+  assert(!blocked.primary.some((b) => b.type === "workout"));
+  assert(blocked.unplaced.some((b) => b.type === "workout"));
 });

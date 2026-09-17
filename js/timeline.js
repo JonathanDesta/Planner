@@ -364,7 +364,7 @@ export function scheduleDay({
       locations: ["ratner"],
       location: "ratner",
       duration: (workout.forecastSeconds + workout.postChangeSeconds) / 60,
-      from: morningEnd,
+      from: Math.max(morningEnd, (workout.notBefore || 0) / 60000),
       until: bounds.bed,
       preferred: atMinute(
         date,
