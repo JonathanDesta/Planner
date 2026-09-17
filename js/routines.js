@@ -8,7 +8,8 @@ export function groomingSunday(date) {
   );
 }
 export function morningSteps(date, overrides = {}) {
-  const hair = [1, 4].includes(weekday(date)),
+  const hair = weekday(date) === 4,
+    shave = [2, 4].includes(weekday(date)),
     grooming = groomingSunday(date),
     steps = [];
   const step = (id, title, minutes, resource = "dorm", extra = {}) =>
@@ -44,9 +45,6 @@ export function morningSteps(date, overrides = {}) {
       "bathroom",
     );
   if (hair) {
-    step("step-out", "Step out and prepare to shave", 1, "bathroom");
-    step("face-shave", "Shave face · two passes", 10, "bathroom");
-    step("step-in", "Get back into the shower", 1, "bathroom");
     step("rinse-masque", "Rinse out hair masque", 3, "bathroom", {
       endsMasque: true,
     });
@@ -55,6 +53,7 @@ export function morningSteps(date, overrides = {}) {
     minimumSeconds: 180,
   });
   step("dry", "Step out and dry off", 4, "bathroom");
+  if (shave) step("face-shave", "Shave face · two passes", 10, "bathroom");
   if (hair) {
     step(
       "leave-in",

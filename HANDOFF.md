@@ -5,7 +5,7 @@ This replaces the legacy global gap-filling scheduler and whole-file timestamp s
 ## Architecture
 
 - `js/dates.js`: Chicago date arithmetic and wall-clock conversion; a fixed daily wake time with exactly 420 elapsed sleep minutes, including clock changes.
-- `js/routines.js`: ordered atomic steps, Sunday recurrence, resource reservation, durable runner state and corrections. Standard/Mon–Thu/ordinary Sunday/grooming Sunday budgets are 70/110/82/110 minutes. The grooming anchor is 2026-09-20. Vacuuming is weekly. The three-minute cold shower cannot be edited shorter.
+- `js/routines.js`: ordered atomic steps, Sunday recurrence, resource reservation, durable runner state and corrections. Standard/Tuesday/Thursday/ordinary Sunday/grooming Sunday budgets are 70/80/108/82/110 minutes. Hair care is Thursday only; Tuesday and Thursday have one two-pass face shave immediately after drying off, before skincare. There is no shower re-entry for shaving. The grooming anchor is 2026-09-20. Vacuuming is weekly. The three-minute cold shower cannot be edited shorter.
 - `js/facilities.js`: effective-dated official dining and gym hours, orientation exceptions, personal overrides and source metadata.
 - `js/travel.js`: building aliases with room text retained, known campus estimates, distance fallback, pedestrian route results and personal overrides. Door-to-door transitions are included once. Unknown locations reserve time and remain visibly identified.
 - `js/timeline.js`: deterministic bounded search over meals, full workouts and flexible commitments, including every journey before acceptance. Fixed calendar/personal events and actual activity times remain pinned. It returns primary blocks, display segments, free time, unplaced items and explicit conflicts. Final validation checks overlaps, sleep, facility availability, bathroom resources and location continuity. The search retains alternate dining locations across intermediate layers. It is a bounded heuristic, not a proof that every conceivable packing has been exhausted.
@@ -18,7 +18,7 @@ This replaces the legacy global gap-filling scheduler and whole-file timestamp s
 
 ## Timing audit
 
-The default 05:15 start ends the Monday/Thursday bathroom sequence at approximately 06:50 and the complete morning at 07:05. Ordinary mornings end 06:25; ordinary Sundays 06:37. Grooming Sundays end 07:05. Setup, room/bathroom transitions and six minutes of contingency are explicit. Masque processing occurs during other steps.
+At the default 05:15 start, Monday uses the ordinary routine. Tuesday finishes its bathroom sequence at 06:20 and the complete morning at 06:35; Thursday finishes its bathroom sequence at 06:48 and the complete morning at 07:03. Ordinary mornings end 06:25; ordinary Sundays 06:37. Grooming Sundays end 07:05. Setup, room/bathroom transitions and six minutes of contingency are explicit. Masque processing occurs during other steps.
 
 Meals reserve 35/45/45 minutes, independently of walking. The location chain respects physical home stops and keeps the physical origin through virtual events. Initial Grossman–Cathey and Grossman–Ratner allowances are five and twenty minutes. Tight ten-minute class transfers were checked individually: the initial Ryerson–BSLC allowance consumes the full gap; Cobb–Kersten uses eight minutes. These are estimates, with no claim of a live measured route. Five-minute early class arrival is an extra preference only where space permits.
 

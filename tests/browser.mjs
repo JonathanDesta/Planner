@@ -117,6 +117,25 @@ try {
     window.__iframeIdentity = "stable";
   });
   await clickNav("Morning");
+  assert.equal(
+    await page
+      .getByRole("heading", {
+        name: "80 minutes, with breathing room.",
+        exact: true,
+      })
+      .count(),
+    1,
+  );
+  const tuesdaySteps = await page.locator(".step-name").allTextContents();
+  assert.equal(tuesdaySteps.includes("Shampoo and wash hair"), false);
+  assert.equal(
+    tuesdaySteps.indexOf("Shave face · two passes"),
+    tuesdaySteps.indexOf("Step out and dry off") + 1,
+  );
+  assert(
+    tuesdaySteps.indexOf("Shave face · two passes") <
+      tuesdaySteps.indexOf("Apply vitamin C serum"),
+  );
   await page
     .getByRole("button", { name: "Start morning routine", exact: true })
     .click();
@@ -203,6 +222,18 @@ try {
     fullPage: true,
   });
   await clickNav("Settings");
+  assert.equal(
+    await page
+      .getByLabel("Shampoo and wash hair", { exact: true })
+      .inputValue(),
+    "6",
+  );
+  assert.equal(
+    await page
+      .getByLabel("Shave face · two passes", { exact: true })
+      .inputValue(),
+    "10",
+  );
   await page.getByLabel("Everyday wake-up").fill("05:20");
   // Foreground refresh and a new feed must not wipe an unsaved settings form.
   await page.evaluate(() =>

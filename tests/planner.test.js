@@ -73,9 +73,12 @@ function classes(date) {
 }
 test("exact routine budgets, sequence, two-week anchor and Sunday vacuum recurrence", () => {
   for (const [date, budget] of [
-    ["2026-09-21", 110],
-    ["2026-09-24", 110],
-    ["2026-09-22", 70],
+    ["2026-09-21", 70],
+    ["2026-09-22", 80],
+    ["2026-09-23", 70],
+    ["2026-09-24", 108],
+    ["2026-09-25", 70],
+    ["2026-09-26", 70],
     ["2026-09-20", 110],
     ["2026-09-27", 82],
     ["2026-10-04", 110],
@@ -94,15 +97,52 @@ test("exact routine budgets, sequence, two-week anchor and Sunday vacuum recurre
     ["vacuum", "day-bag"],
   ])
     assert(sunday.indexOf(before) < sunday.indexOf(after));
-  const mon = routineBlocks("2026-09-21", atMinute("2026-09-21", 315));
-  assert.equal(
-    formatTime(mon.filter((s) => s.resource === "bathroom").at(-1).end),
-    "6:50 AM",
-  );
-  assert.equal(
-    morningSteps("2026-09-22").some((s) => s.id === "face-shave"),
-    false,
-  );
+  for (const [date, bathroomEnd, routineEnd] of [
+    ["2026-09-21", "6:10 AM", "6:25 AM"],
+    ["2026-09-22", "6:20 AM", "6:35 AM"],
+    ["2026-09-24", "6:48 AM", "7:03 AM"],
+  ]) {
+    const blocks = routineBlocks(date, atMinute(date, 315));
+    assert.equal(
+      formatTime(blocks.filter((s) => s.resource === "bathroom").at(-1).end),
+      bathroomEnd,
+    );
+    assert.equal(formatTime(blocks.at(-1).end), routineEnd);
+    assert(!blocks.some((s) => s.id === "morning:bathroom-wait"));
+  }
+});
+test("hair is Thursday only; Tuesday and Thursday shave once after the final shower exit before skincare", () => {
+  for (let day = 0; day < 14; day++) {
+    const date = addDays("2026-09-20", day),
+      steps = morningSteps(date).map((s) => s.id),
+      hair = weekday(date) === 4,
+      shave = [2, 4].includes(weekday(date));
+    for (const id of [
+      "shampoo",
+      "masque",
+      "rinse-masque",
+      "leave-in",
+      "jojoba",
+      "hair-gel",
+      "sponge",
+    ])
+      assert.equal(steps.includes(id), hair, `${date}: ${id}`);
+    assert.equal(
+      steps.filter((id) => id === "face-shave").length,
+      shave ? 1 : 0,
+      date,
+    );
+    assert(!steps.includes("step-out") && !steps.includes("step-in"), date);
+    if (shave) {
+      assert.equal(steps.indexOf("face-shave"), steps.indexOf("dry") + 1, date);
+      assert(steps.indexOf("face-shave") < steps.indexOf("vitamin-c"), date);
+    }
+    if (hair) {
+      assert(steps.indexOf("body-scrub") < steps.indexOf("rinse-masque"));
+      assert(steps.indexOf("rinse-masque") < steps.indexOf("cold"));
+      assert(steps.indexOf("sponge") < steps.indexOf("vitamin-c"));
+    }
+  }
 });
 test("timers survive reloads and pauses without auto-completing; corrections remain ordered", () => {
   let run = startRun("2026-09-22", 1000000);
@@ -212,7 +252,7 @@ test("dining follows summer, orientation and regular Saturday exceptions", () =>
   assert.equal(facilityHours("ratner", "2026-09-28").provisional, true);
 });
 test("bathroom overruns, impossible tasks and fixed overlaps remain visible", () => {
-  const date = "2026-09-28",
+  const date = "2026-10-01",
     settings = defaults().settings;
   settings.routineDurations.toilet = 40 * 60;
   const r = scheduleDay({
@@ -540,7 +580,7 @@ test("a C session moved to Friday uses Friday availability instead of a Thursday
 });
 
 test("a late morning reserves the bathroom after cleaning and keeps an actual overrun visible", () => {
-  const date = "2026-09-28",
+  const date = "2026-10-01",
     late = atMinute(date, 360) * 60000;
   let run = startRun(date, late);
   run = finishStep(run, late + 3 * 60000);

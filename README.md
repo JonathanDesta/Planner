@@ -24,4 +24,4 @@ The development server exposes `/Planner/` and `/oly-tracker/` on the same origi
 
 See [Setup](SETUP.md), [Architecture and audit](HANDOFF.md) and [Release workflow](WORKFLOW.md).
 
-Planner 2.0.3 follows Oly’s explicit weekday schedule (Mon B / Tue C / Thu A / Fri D), retains the separate test-week Saturday bench, and respects actual logged bench eligibility when placing current sessions. It does not change Oly prescriptions or write Calendar events.
+Planner 2.0.4 uses Thursday-only hair care and Tuesday/Thursday face shaving after drying off, before skincare. It follows Oly’s explicit weekday schedule (Mon B / Tue C / Thu A / Fri D), retains the separate test-week Saturday bench, and respects actual logged bench eligibility when placing current sessions. It does not change Oly prescriptions or write Calendar events.
