@@ -1,5 +1,6 @@
 import { weekday, dayDifference, dateISO, atMinute } from "./dates.js";
 export const GROOMING_ANCHOR = "2026-09-20";
+export const BATHROOM_CLOSURES = [[855, 870]];
 export function groomingSunday(date) {
   return (
     weekday(date) === 0 &&
@@ -8,7 +9,7 @@ export function groomingSunday(date) {
   );
 }
 export function morningSteps(date, overrides = {}) {
-  const hair = weekday(date) === 4,
+  const hair = weekday(date) === 6,
     shave = [2, 4, 6].includes(weekday(date)),
     grooming = groomingSunday(date),
     steps = [];
@@ -109,10 +110,7 @@ function bathroomStart(date, start, steps) {
     .filter((s) => s.resource === "bathroom")
     .reduce((n, s) => n + s.seconds / 60, 0);
   let begin = start;
-  for (const [a, b] of [
-    [420, 480],
-    [855, 870],
-  ]) {
+  for (const [a, b] of BATHROOM_CLOSURES) {
     const closed = atMinute(date, a),
       opens = atMinute(date, b);
     if (begin < opens && begin + duration > closed) begin = opens;

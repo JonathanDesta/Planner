@@ -7,6 +7,8 @@ import {
   saveState,
   KEY,
   MIGRATION,
+  MORNING_MIGRATION,
+  adoptPlannerEntities,
 } from "../js/state.js";
 import {
   atMinute,
@@ -76,9 +78,9 @@ test("exact routine budgets, sequence, two-week anchor and Sunday vacuum recurre
     ["2026-09-21", 70],
     ["2026-09-22", 80],
     ["2026-09-23", 70],
-    ["2026-09-24", 108],
+    ["2026-09-24", 80],
     ["2026-09-25", 70],
-    ["2026-09-26", 80],
+    ["2026-09-26", 108],
     ["2026-09-20", 110],
     ["2026-09-27", 82],
     ["2026-10-04", 110],
@@ -98,12 +100,12 @@ test("exact routine budgets, sequence, two-week anchor and Sunday vacuum recurre
   ])
     assert(sunday.indexOf(before) < sunday.indexOf(after));
   for (const [date, bathroomEnd, routineEnd] of [
-    ["2026-09-21", "6:10 AM", "6:25 AM"],
-    ["2026-09-22", "6:20 AM", "6:35 AM"],
-    ["2026-09-24", "6:48 AM", "7:03 AM"],
-    ["2026-09-26", "6:20 AM", "6:35 AM"],
+    ["2026-09-21", "7:55 AM", "8:10 AM"],
+    ["2026-09-22", "8:05 AM", "8:20 AM"],
+    ["2026-09-24", "8:05 AM", "8:20 AM"],
+    ["2026-09-26", "8:33 AM", "8:48 AM"],
   ]) {
-    const blocks = routineBlocks(date, atMinute(date, 315));
+    const blocks = routineBlocks(date, sleepBounds(date).wake);
     assert.equal(
       formatTime(blocks.filter((s) => s.resource === "bathroom").at(-1).end),
       bathroomEnd,
@@ -112,11 +114,11 @@ test("exact routine budgets, sequence, two-week anchor and Sunday vacuum recurre
     assert(!blocks.some((s) => s.id === "morning:bathroom-wait"));
   }
 });
-test("hair is Thursday only; Tuesday, Thursday and Saturday shave once after the final shower exit before skincare", () => {
+test("hair is Saturday only; Tuesday, Thursday and Saturday shave once after the final shower exit before skincare", () => {
   for (let day = 0; day < 14; day++) {
     const date = addDays("2026-09-20", day),
       steps = morningSteps(date).map((s) => s.id),
-      hair = weekday(date) === 4,
+      hair = weekday(date) === 6,
       shave = [2, 4, 6].includes(weekday(date));
     for (const id of [
       "shampoo",
@@ -159,14 +161,25 @@ test("timers survive reloads and pauses without auto-completing; corrections rem
   assert.equal(run.index, 0);
   assert.equal(run.completed.length, 0);
 });
+test("morning bathroom access stays open across 7–8 AM, including a running step", () => {
+  const date = "2026-10-03",
+    start = atMinute(date, 420) * 60000;
+  let run = startRun(date, start);
+  run = finishStep(run, start + 3 * 60000);
+  run = finishStep(run, start + 6 * 60000);
+  assert.equal(run.currentStartedAt, start + 6 * 60000);
+  const result = scheduleDay({ date, run, now: atMinute(date, 470) * 60000 });
+  assert(!result.routine.some((b) => b.id === "morning:bathroom-wait"));
+  assert(!result.conflicts.some((c) => c.kind === "resource"));
+});
 test("seven elapsed hours and identical wake time across daylight-saving changes", () => {
   for (const date of ["2026-10-31", "2026-11-01", "2027-03-13", "2027-03-14"]) {
     const b = sleepBounds(date);
     assert.equal(b.nextWake - b.bed, 420);
-    assert.equal(formatTime(b.wake), "5:15 AM");
+    assert.equal(formatTime(b.wake), "7:00 AM");
   }
-  assert.equal(formatTime(sleepBounds("2026-10-31").bed), "11:15 PM");
-  assert.equal(formatTime(sleepBounds("2027-03-13").bed), "9:15 PM");
+  assert.equal(formatTime(sleepBounds("2026-10-31").bed), "1:00 AM");
+  assert.equal(formatTime(sleepBounds("2027-03-13").bed), "11:00 PM");
   assert.throws(() => atMinute("2027-03-14", 150), /does not exist/);
 });
 test("campus transitions include doors once; home stops change the following origin", () => {
@@ -250,12 +263,13 @@ test("dining follows summer, orientation and regular Saturday exceptions", () =>
     saturday.primary.find((b) => b.meal === "dinner").location,
     "woodlawn",
   );
-  assert.equal(facilityHours("ratner", "2026-09-28").provisional, true);
+  assert.equal(facilityHours("ratner", "2026-09-28").provisional, false);
 });
 test("bathroom overruns, impossible tasks and fixed overlaps remain visible", () => {
   const date = "2026-10-01",
     settings = defaults().settings;
   settings.routineDurations.toilet = 40 * 60;
+  settings.wakeTime = "13:00";
   const r = scheduleDay({
     date,
     settings,
@@ -419,7 +433,7 @@ test("migration preserves old data and credentials while replacing obsolete sche
     loaded = loadState(storage);
   assert(loaded.migrated);
   assert(storage.getItem(MIGRATION));
-  assert.equal(loaded.state.settings.wakeTime, "05:15");
+  assert.equal(loaded.state.settings.wakeTime, "07:00");
   assert.equal(loaded.state.settings.googleClientId, "client");
   assert.equal(loaded.state.legacyHistory.night.length, 1);
   assert.equal(loaded.state.commitments[0].location, "Library");
@@ -432,10 +446,88 @@ test("migration preserves old data and credentials while replacing obsolete sche
   );
 });
 
-test("Thursday retains alternate dining needed to fit the complete workout after lab", () => {
+test("morning update backs up old defaults once and preserves runs, history, custom timing and cloud preferences", () => {
+  const old = defaults();
+  delete old.settings.morningScheduleVersion;
+  old.settings.wakeTime = "05:15";
+  old.settings.routineDurations["face-shave"] = 720;
+  old.settings.googleClientId = "saved-client";
+  old.runs["2026-10-03"] = startRun(
+    "2026-10-03",
+    atMinute("2026-10-03", 315) * 60000,
+  );
+  old.runs["2026-10-03"].steps = morningSteps("2026-10-08");
+  old.routineHistory = [{ id: "past", date: "2026-09-24" }];
+  const raw = JSON.stringify(old),
+    storage = memory({ [KEY]: raw });
+  const updated = loadState(storage).state;
+  assert.equal(updated.settings.wakeTime, "07:00");
+  assert.equal(storage.getItem(MORNING_MIGRATION), raw);
+  assert.deepEqual(updated.runs, old.runs);
+  assert.deepEqual(updated.routineHistory, old.routineHistory);
+  assert.equal(updated.settings.routineDurations["face-shave"], 720);
+  assert.equal(updated.settings.googleClientId, "saved-client");
+  assert.equal(loadState(storage).state.version, updated.version);
+  assert.equal(
+    adoptPlannerEntities(updated, plannerEntities(old)).settings.wakeTime,
+    "07:00",
+  );
+  old.settings.wakeTime = "06:45";
+  assert.equal(
+    loadState(memory({ [KEY]: JSON.stringify(old) })).state.settings.wakeTime,
+    "06:45",
+  );
+  updated.settings.wakeTime = "05:15";
+  saveState(storage, updated);
+  assert.equal(loadState(storage).state.settings.wakeTime, "05:15");
+});
+
+test("Ratner autumn hours include Thanksgiving closures and preserve dated overrides", () => {
+  for (const [date, opening, closing] of [
+    ["2026-10-05", "7:00 AM", "11:00 PM"],
+    ["2026-10-09", "7:00 AM", "9:00 PM"],
+    ["2026-10-10", "8:00 AM", "9:00 PM"],
+    ["2026-11-22", "8:00 AM", "6:00 PM"],
+    ["2026-11-23", "7:00 AM", "9:00 PM"],
+    ["2026-11-25", "7:00 AM", "6:00 PM"],
+    ["2026-11-29", "8:00 AM", "6:00 PM"],
+    ["2026-11-30", "7:00 AM", "11:00 PM"],
+  ]) {
+    const h = facilityHours("ratner", date);
+    assert(h.verified && !h.provisional);
+    assert.deepEqual(h.intervals[0].map(formatTime), [opening, closing]);
+  }
+  for (const date of ["2026-11-26", "2026-11-27"])
+    assert.deepEqual(facilityHours("ratner", date).intervals, []);
+  assert(facilityHours("ratner", "2026-12-13").provisional);
+  assert.deepEqual(
+    facilityHours("ratner", "2026-10-05", [
+      {
+        place: "ratner",
+        from: "2026-10-05",
+        until: "2026-10-05",
+        intervals: [],
+      },
+    ]).intervals,
+    [],
+  );
+});
+
+test("Thursday retains alternate dining needed when a dated gym override closes early", () => {
   const date = "2026-10-01";
   const result = scheduleDay({
     date,
+    settings: {
+      hours: [
+        {
+          place: "ratner",
+          from: date,
+          until: date,
+          intervals: [[420, 1260]],
+          source: "Test early closure",
+        },
+      ],
+    },
     events: classes(date),
     workout: {
       label: "Workout C",
@@ -580,13 +672,13 @@ test("a C session moved to Friday uses Friday availability instead of a Thursday
   assert.deepEqual(result.conflicts, []);
 });
 
-test("a late morning reserves the bathroom after cleaning and keeps an actual overrun visible", () => {
+test("an afternoon routine reserves the bathroom after cleaning and keeps an actual overrun visible", () => {
   const date = "2026-10-01",
-    late = atMinute(date, 360) * 60000;
+    late = atMinute(date, 810) * 60000;
   let run = startRun(date, late);
   run = finishStep(run, late + 3 * 60000);
   run = finishStep(run, late + 6 * 60000);
-  assert.equal(run.currentStartedAt, atMinute(date, 480) * 60000);
+  assert.equal(run.currentStartedAt, atMinute(date, 870) * 60000);
   assert.throws(() => finishStep(run, late + 7 * 60000), /reopens/);
   run = JSON.parse(JSON.stringify(run));
   assert.equal(elapsedStep(run, late + 30 * 60000), 0);
@@ -601,7 +693,7 @@ test("a late morning reserves the bathroom after cleaning and keeps an actual ov
     scheduleDay({
       date,
       run: overrun,
-      now: atMinute(date, 430) * 60000,
+      now: atMinute(date, 865) * 60000,
     }).conflicts.some((c) => c.kind === "resource"),
   );
 });

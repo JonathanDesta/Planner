@@ -1,8 +1,15 @@
-import { validDate, clockMinutes, atMinute, addDays } from "./dates.js";
+import {
+  validDate,
+  clockMinutes,
+  atMinute,
+  addDays,
+  DEFAULT_WAKE_TIME,
+} from "./dates.js";
 import { migrateRun } from "./routines.js";
 export const KEY = "planner_v2",
   BACKUP = "planner_v2_backup",
-  MIGRATION = "planner_before_campus_v2";
+  MIGRATION = "planner_before_campus_v2",
+  MORNING_MIGRATION = "planner_before_morning_20261003";
 const object = (v) => v && typeof v === "object" && !Array.isArray(v);
 const assert = (ok, message) => {
   if (!ok)
@@ -16,7 +23,8 @@ export function defaults() {
     version: 0,
     updatedAt: 0,
     settings: {
-      wakeTime: "05:15",
+      wakeTime: DEFAULT_WAKE_TIME,
+      morningScheduleVersion: 1,
       googleClientId: "",
       googleCalendarIds: ["primary"],
       defaultTravelMin: 15,
@@ -35,6 +43,15 @@ export function defaults() {
     calCache: {},
     legacyHistory: { morning: [], night: [] },
     legacyArchive: null,
+  };
+}
+function upgradeMorningPreferences(settings) {
+  if (settings.morningScheduleVersion >= 1) return settings;
+  return {
+    ...settings,
+    wakeTime:
+      settings.wakeTime === "05:15" ? DEFAULT_WAKE_TIME : settings.wakeTime,
+    morningScheduleVersion: 1,
   };
 }
 export function validate(data) {
@@ -195,6 +212,7 @@ export function validate(data) {
       "activity progress",
     );
   assert(Array.isArray(s.routineHistory), "routine history");
+  s.settings = upgradeMorningPreferences(s.settings);
   return s;
 }
 export function migrateLegacy(old, oldRun) {
@@ -268,8 +286,24 @@ export function loadState(storage) {
     const raw = storage.getItem(key);
     if (!raw) continue;
     try {
+      const stored = JSON.parse(raw),
+        state = validate(stored);
+      if (
+        stored.settings.morningScheduleVersion !==
+        state.settings.morningScheduleVersion
+      ) {
+        if (!storage.getItem(MORNING_MIGRATION))
+          storage.setItem(MORNING_MIGRATION, raw);
+        return {
+          state: saveState(storage, state, state.version),
+          recovered: key === BACKUP,
+          migrated: true,
+          message:
+            "Morning schedule updated. The former 5:15 AM default is now 7 AM; saved routines and custom wake times are preserved.",
+        };
+      }
       return {
-        state: validate(JSON.parse(raw)),
+        state,
         recovered: key === BACKUP,
         message: errors.join(" "),
       };
@@ -359,7 +393,10 @@ export function adoptPlannerEntities(state, entities) {
       .map(([key, value]) => [key.slice(prefix.length), value]);
   return validate({
     ...state,
-    settings: { ...state.settings, ...entities.preferences },
+    settings: {
+      ...state.settings,
+      ...upgradeMorningPreferences(entities.preferences),
+    },
     commitments: pairs("commitment:").map(([, v]) => v),
     runs: Object.fromEntries(pairs("routine:")),
     activities: Object.fromEntries(pairs("activity:")),

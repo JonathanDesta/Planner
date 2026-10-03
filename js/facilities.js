@@ -23,6 +23,36 @@ export function facilityHours(place, date, overrides = []) {
     };
   const day = weekday(date);
   if (place === "ratner") {
+    if (date >= "2026-09-28" && date <= "2026-12-12") {
+      const holiday = date >= "2026-11-22" && date <= "2026-11-29",
+        closed = ["2026-11-26", "2026-11-27"].includes(date),
+        weekend = day === 0 || day === 6,
+        closing =
+          date === "2026-11-25"
+            ? 1080
+            : holiday
+              ? weekend
+                ? 1080
+                : 1260
+              : day >= 1 && day <= 4
+                ? 1380
+                : 1260;
+      return {
+        place,
+        intervals: closed
+          ? []
+          : [[atMinute(date, weekend ? 480 : 420), atMinute(date, closing)]],
+        verified: true,
+        provisional: false,
+        from: "2026-09-28",
+        until: "2026-12-12",
+        checkedAt: "2026-10-03",
+        source: RATNER_SOURCE,
+        note: holiday
+          ? "Published Thanksgiving break hours"
+          : "Published autumn hours",
+      };
+    }
     const known = date <= "2026-09-27" && date >= "2026-06-06";
     const closed = [
       "2026-06-19",

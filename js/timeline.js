@@ -5,7 +5,7 @@ import {
   dateISO,
   weekday,
 } from "./dates.js";
-import { routineBlocks } from "./routines.js";
+import { routineBlocks, BATHROOM_CLOSURES } from "./routines.js";
 import { travelBetween, resolvePlace } from "./travel.js";
 import { facilityHours, insideHours } from "./facilities.js";
 
@@ -296,7 +296,7 @@ export function scheduleDay({
   previous = [],
   now = Date.now(),
 }) {
-  const bounds = sleepBounds(date, settings.wakeTime || "05:15"),
+  const bounds = sleepBounds(date, settings.wakeTime),
     conflicts = [],
     notes = [];
   const routine = routineBlocks(
@@ -525,10 +525,7 @@ export function scheduleDay({
         message: `${a.title} overlaps the protected seven-hour sleep window.`,
       });
     if (a.resource === "bathroom")
-      for (const [start, end] of [
-        [420, 480],
-        [855, 870],
-      ])
+      for (const [start, end] of BATHROOM_CLOSURES)
         if (
           overlap(a, { start: atMinute(date, start), end: atMinute(date, end) })
         )

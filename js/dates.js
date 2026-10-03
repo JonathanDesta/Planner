@@ -1,4 +1,5 @@
 export const ZONE = "America/Chicago";
+export const DEFAULT_WAKE_TIME = "07:00";
 const partsFormat = new Intl.DateTimeFormat("en-CA", {
   timeZone: ZONE,
   year: "numeric",
@@ -78,7 +79,7 @@ export function atMinute(date, wallMinute) {
     throw Error("That local time does not exist on this clock-change date.");
   return epoch / 60000;
 }
-export function sleepBounds(date, wake = "05:15") {
+export function sleepBounds(date, wake = DEFAULT_WAKE_TIME) {
   const minute = clockMinutes(wake);
   if (minute === null) throw Error("Invalid wake time.");
   const start = atMinute(date, minute),

@@ -38,7 +38,7 @@ const clickNav = (name) =>
     .getByRole("button", { name, exact: true })
     .click();
 try {
-  await page.clock.install({ time: new Date("2026-09-29T05:15:00-05:00") });
+  await page.clock.install({ time: new Date("2026-09-29T07:00:00-05:00") });
   await page.goto(url);
   await page.getByRole("heading", { name: "Make room for today." }).waitFor();
   await page.evaluate(async () => {
@@ -46,6 +46,9 @@ try {
       { atMinute, addDays, weekday } = await import("./js/dates.js");
     const s = defaults();
     s.version = 1;
+    // Exercise a real upgrade from the previous release, not just fresh defaults.
+    s.settings.wakeTime = "05:15";
+    delete s.settings.morningScheduleVersion;
     const events = [];
     const add = (date, title, a, b, location) =>
       events.push({
@@ -116,6 +119,38 @@ try {
   await frame.evaluate(() => {
     window.__iframeIdentity = "stable";
   });
+  await clickNav("Morning");
+  for (const [date, minutes, hair] of [
+    ["2026-10-01", 80, false],
+    ["2026-10-03", 108, true],
+  ]) {
+    await page.locator("#page-morning").getByLabel("Selected date").fill(date);
+    await page
+      .getByRole("heading", {
+        name: `${minutes} minutes, with breathing room.`,
+        exact: true,
+      })
+      .waitFor();
+    const steps = await page.locator(".step-name").allTextContents();
+    assert.equal(steps.includes("Shampoo and wash hair"), hair);
+    assert.equal(
+      steps.filter((s) => s === "Shave face · two passes").length,
+      1,
+    );
+    assert.equal(
+      steps.indexOf("Shave face · two passes"),
+      steps.indexOf("Step out and dry off") + 1,
+    );
+    assert.equal(await page.getByText(/Bathroom closes at 7 AM/).count(), 0);
+  }
+  await page.screenshot({
+    path: "test-results/saturday-morning-mobile.png",
+    fullPage: true,
+  });
+  await page
+    .locator("#page-morning")
+    .getByRole("button", { name: "Today", exact: true })
+    .click();
   await clickNav("Morning");
   assert.equal(
     await page
@@ -191,8 +226,8 @@ try {
   await dialog.getByLabel("What do you need to do?").fill("Pick up notebook");
   await dialog.getByLabel("Duration · minutes").fill("15");
   await dialog.getByLabel("Location", { exact: true }).fill("Grossman dorm");
-  await dialog.getByLabel("Earliest start").fill("08:00");
-  await dialog.getByLabel("Finish by").fill("09:00");
+  await dialog.getByLabel("Earliest start").fill("12:30");
+  await dialog.getByLabel("Finish by").fill("23:00");
   await dialog
     .getByRole("button", { name: "Save commitment", exact: true })
     .click();
@@ -222,6 +257,7 @@ try {
     fullPage: true,
   });
   await clickNav("Settings");
+  assert.equal(await page.getByLabel("Everyday wake-up").inputValue(), "07:00");
   assert.equal(
     await page
       .getByLabel("Shampoo and wash hair", { exact: true })
@@ -240,7 +276,7 @@ try {
     document.dispatchEvent(new Event("visibilitychange")),
   );
   assert.equal(await page.getByLabel("Everyday wake-up").inputValue(), "05:20");
-  await page.getByLabel("Everyday wake-up").fill("05:15");
+  await page.getByLabel("Everyday wake-up").fill("07:00");
   await page
     .getByRole("button", { name: "Save daily timing", exact: true })
     .click();

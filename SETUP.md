@@ -19,7 +19,7 @@ Calendar refreshes on connection, foreground return, manual refresh and every fi
 ## Daily use
 
 - Expand Today blocks for the duration, location, source and travel basis. Unplaced items remain under **Still to place**. Start or complete meals and personal commitments to preserve their actual times when replanning.
-- The morning runner supports pause, skip and undo, and survives reload. Timer zero never completes a step. An unstarted bathroom sequence waits for reopening if its full allowance crosses cleaning; an actual overrun is reported.
+- The morning runner supports pause, skip and undo, and survives reload. Timer zero never completes a step. Morning bathroom access is open. An unstarted bathroom sequence waits for reopening if its full allowance crosses the 2:15–2:30 PM cleaning; an actual overrun is reported.
 - In Oly, log the prescribed work as usual. Comparable completed sessions calibrate scheduling with the median of the latest five. Mark deliberate non-training interruptions for exclusion; warm-ups, queues and normal rests remain included. Declare when a measurement already includes changing.
 - Resolve concurrent versions explicitly from Settings. The private revision history retains both alternatives. Independent records merge automatically.
 - Set door-to-door walking overrides after measuring them. Optional pedestrian routing uses a locally stored TomTom key; four minutes for building transitions are added once. Dated facility overrides supersede the bundled hours.
