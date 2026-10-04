@@ -24,4 +24,4 @@ The development server exposes `/Planner/` and `/oly-tracker/` on the same origi
 
 See [Setup](SETUP.md), [Architecture and audit](HANDOFF.md) and [Release workflow](WORKFLOW.md).
 
-Planner 2.0.6 removes the morning bathroom closure and moves the old 05:15 default to 07:00 with a backup; custom wake times and started routines are preserved. It uses Saturday-only hair care and Tuesday/Thursday/Saturday face shaving after drying off, before skincare. It follows the dates, durations and current program supplied by Oly’s scheduling feed, including dated exceptions. It does not change Oly prescriptions or write Calendar events.
+Planner 2.0.7 removes the morning bathroom closure and moves the old 05:15 default to 07:00 with a backup; custom wake times and started routines are preserved. It uses Saturday-only hair care and Tuesday/Thursday/Saturday face shaving after drying off, before skincare. It follows the dates, durations and current program supplied by Oly’s scheduling feed, including dated exceptions. It does not change Oly prescriptions or write Calendar events.

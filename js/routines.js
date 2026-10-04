@@ -29,7 +29,21 @@ export function morningSteps(date, overrides = {}) {
   step("listerine", "Rinse with Listerine", 1, "bathroom");
   step("water-floss", "Water floss", 3, "bathroom");
   step("retainer", "Clean retainer", 3, "bathroom");
-  step("shower-prep", "Undress and prepare the shower", 2, "bathroom");
+  step(
+    "shower-prep",
+    grooming
+      ? "Undress and prepare to shave and shower"
+      : "Undress and prepare the shower",
+    2,
+    "bathroom",
+  );
+  if (grooming)
+    step(
+      "body-shave",
+      "Shave pubic and armpit hair while dry, before showering",
+      15,
+      "bathroom",
+    );
   if (hair) {
     step("shampoo", "Shampoo and wash hair", 6, "bathroom");
     step("masque", "Apply hair masque and detangle with comb", 7, "bathroom", {
@@ -38,13 +52,6 @@ export function morningSteps(date, overrides = {}) {
   }
   step("cleanse", "Facial cleanse", 2, "bathroom");
   step("body-scrub", "Full body scrub", 6, "bathroom");
-  if (grooming)
-    step(
-      "body-shave",
-      "Shave pubic and armpit hair in the shower",
-      15,
-      "bathroom",
-    );
   if (hair) {
     step("rinse-masque", "Rinse out hair masque", 3, "bathroom", {
       endsMasque: true,

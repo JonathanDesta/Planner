@@ -92,7 +92,9 @@ test("exact routine budgets, sequence, two-week anchor and Sunday vacuum recurre
   assert.equal(groomingSunday("2026-09-13"), false);
   const sunday = morningSteps("2026-09-20").map((s) => s.id);
   for (const [before, after] of [
-    ["body-shave", "dry"],
+    ["shower-prep", "body-shave"],
+    ["body-shave", "cleanse"],
+    ["body-shave", "body-scrub"],
     ["unibrow", "vitamin-c"],
     ["outfit", "nails"],
     ["nails", "vacuum"],
